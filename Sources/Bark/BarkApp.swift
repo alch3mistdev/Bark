@@ -40,14 +40,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.onboardingWindow?.close()
             self?.onboardingWindow = nil
         }
-        let window = NSWindow(contentViewController: NSHostingController(rootView: view))
+        let hosting = NSHostingController(rootView: view)
+        // Don't let SwiftUI drive the window's content-size extrema — that path
+        // (`updateWindowContentSizeExtremaIfNecessary`) re-entrantly invalidates
+        // constraints during the launch display cycle and throws (crash fix).
+        hosting.sizingOptions = []
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 580),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
         window.title = "Welcome to Bark"
-        window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
+        window.contentViewController = hosting
+        window.setContentSize(NSSize(width: 480, height: 580))
         window.center()
         onboardingWindow = window
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
+
+        // Present after the current runloop turn, not mid-launch layout.
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+        }
     }
 }
 
