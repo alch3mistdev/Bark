@@ -81,6 +81,32 @@ final class FakeCleaner: TextCleaner, @unchecked Sendable {
     }
 }
 
+/// Cleaner with a controllable prepare/download (progress, cancel, success/fail)
+/// for exercising the LLM model-lifecycle state machine.
+final class FakePreparingCleaner: TextCleaner, @unchecked Sendable {
+    enum Outcome { case succeed, fail }
+    let outcome: Outcome
+    private var loaded = false
+
+    init(_ outcome: Outcome = .succeed) { self.outcome = outcome }
+
+    var isAvailable: Bool { get async { loaded } }
+
+    func prepare(progress: @escaping @Sendable (Double) -> Void) async throws {
+        progress(0.3)
+        try await Task.sleep(for: .milliseconds(30))   // simulated download window
+        try Task.checkCancellation()
+        progress(1.0)
+        if outcome == .fail { throw CleanupError.modelUnavailable }
+        loaded = true
+    }
+
+    func clean(_ text: String, mode: Mode) async throws -> String {
+        guard loaded else { throw CleanupError.modelUnavailable }
+        return "LLM:\(text)"
+    }
+}
+
 /// Injector that records text, or fails a configurable number of times.
 final class FakeInjector: TextInjector, @unchecked Sendable {
     enum FailMode { case none, secure, focusChanged }

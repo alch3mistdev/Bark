@@ -61,7 +61,7 @@ public struct Settings: Codable, Sendable, Equatable {
         hotkey: HotkeySetting = .default,
         launchAtLogin: Bool = false,
         historyEnabled: Bool = false,
-        llmEnabled: Bool = true,
+        llmEnabled: Bool = false,   // opt-in: enabling triggers the ~2.5 GB model download (consent)
         restoreClipboard: Bool = true,
         soundFeedback: Bool = true,
         hasCompletedOnboarding: Bool = false

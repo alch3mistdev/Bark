@@ -78,6 +78,27 @@ private let supportedLocales: [(String, String)] = [
     ("pt-BR", "Portuguese (BR)"), ("ja-JP", "Japanese"), ("zh-CN", "Chinese"), ("ko-KR", "Korean"),
 ]
 
+private struct LLMStatusBadge: View {
+    let status: LLMStatus
+    var body: some View {
+        switch status {
+        case .unavailable:
+            Text("Not in this build").foregroundStyle(.secondary)
+        case .notLoaded:
+            Text("Qwen3-4B — not downloaded").foregroundStyle(.secondary)
+        case .downloading(let p):
+            HStack(spacing: 8) {
+                ProgressView(value: p).frame(width: 90)
+                Text("\(Int(p * 100))%").monospacedDigit().foregroundStyle(.secondary)
+            }
+        case .ready:
+            Label("Qwen3-4B ready", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+        case .failed(let message):
+            Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+        }
+    }
+}
+
 private struct GeneralPane: View {
     @Bindable var controller: DictationController
 
@@ -92,12 +113,26 @@ private struct GeneralPane: View {
             }
             Section("Cleanup") {
                 Toggle("Use LLM rewrite for LLM modes", isOn: $controller.llmEnabled)
-                    .disabled(!controller.llmAvailable)
-                LabeledContent("LLM engine", value: controller.llmAvailable ? "Qwen3-4B (MLX)" : "Not included in this build")
-                if !controller.llmAvailable {
-                    Text("This build ships without the on-device LLM (a ~2.5 GB model), so the toggle is "
-                         + "off. LLM modes (Email, Message, Code, List) use the instant deterministic cleaner. "
-                         + "To enable the Qwen3-4B rewrite, install the MLX build (README → \u{201C}Enable LLM rewrite\u{201D}).")
+                    .disabled(!controller.llmEnginePresent)
+
+                LabeledContent("LLM engine") { LLMStatusBadge(status: controller.llmStatus) }
+
+                if !controller.llmEnginePresent {
+                    Text("This build ships without the on-device LLM. LLM modes (Email, Message, Code, "
+                         + "List) use the instant deterministic cleaner. Install the MLX build "
+                         + "(README → \u{201C}Enable LLM rewrite\u{201D}) to add Qwen3-4B.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    switch controller.llmStatus {
+                    case .notLoaded:
+                        Button("Download model (~2.5 GB)") { controller.prepareLLM() }
+                    case .failed:
+                        Button("Retry download") { controller.prepareLLM() }
+                    default:
+                        EmptyView()
+                    }
+                    Text("First download is ~2.5 GB; afterwards the model runs fully offline. Until it's "
+                         + "ready, LLM modes use the instant cleaner.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
