@@ -4,23 +4,68 @@ import BarkEngines
 
 struct SettingsView: View {
     @Bindable var controller: DictationController
+    @State private var pane: Pane = .general
+
+    enum Pane: String, CaseIterable, Identifiable {
+        case general, hotkey, modes, history, permissions, privacy
+        var id: String { rawValue }
+        var icon: String {
+            switch self {
+            case .general: "gearshape"
+            case .hotkey: "keyboard"
+            case .modes: "slider.horizontal.3"
+            case .history: "clock"
+            case .permissions: "lock.shield"
+            case .privacy: "hand.raised"
+            }
+        }
+        var title: String {
+            switch self {
+            case .general: "General"
+            case .hotkey: "Hotkey"
+            case .modes: "Modes"
+            case .history: "History"
+            case .permissions: "Permissions"
+            case .privacy: "Privacy"
+            }
+        }
+    }
 
     var body: some View {
-        TabView {
-            GeneralPane(controller: controller)
-                .tabItem { Label("General", systemImage: "gearshape") }
-            HotkeyPane(controller: controller)
-                .tabItem { Label("Hotkey", systemImage: "keyboard") }
-            ModesPane(controller: controller)
-                .tabItem { Label("Modes", systemImage: "slider.horizontal.3") }
-            HistoryPane(controller: controller)
-                .tabItem { Label("History", systemImage: "clock") }
-            PermissionsPane(controller: controller)
-                .tabItem { Label("Permissions", systemImage: "lock.shield") }
-            PrivacyPane()
-                .tabItem { Label("Privacy", systemImage: "hand.raised") }
+        VStack(spacing: 0) {
+            HStack(spacing: 2) {
+                ForEach(Pane.allCases) { item in
+                    Button {
+                        pane = item
+                    } label: {
+                        Image(systemName: item.icon)
+                            .font(.system(size: 16, weight: .medium))
+                            .frame(width: 40, height: 32)
+                            .background(pane == item ? Color.accentColor.opacity(0.18) : .clear,
+                                        in: RoundedRectangle(cornerRadius: 7))
+                            .foregroundStyle(pane == item ? Color.accentColor : .secondary)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(item.title)
+                }
+            }
+            .padding(8)
+            Divider()
+
+            Group {
+                switch pane {
+                case .general: GeneralPane(controller: controller)
+                case .hotkey: HotkeyPane(controller: controller)
+                case .modes: ModesPane(controller: controller)
+                case .history: HistoryPane(controller: controller)
+                case .permissions: PermissionsPane(controller: controller)
+                case .privacy: PrivacyPane()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 480, height: 420)
+        .frame(width: 480, height: 430)
         .onAppear { controller.refreshPermissions() }
     }
 }
@@ -48,9 +93,11 @@ private struct GeneralPane: View {
             Section("Cleanup") {
                 Toggle("Use LLM rewrite for LLM modes", isOn: $controller.llmEnabled)
                     .disabled(!controller.llmAvailable)
-                LabeledContent("LLM engine", value: controller.llmAvailable ? "Qwen3-4B (MLX)" : "Not installed")
+                LabeledContent("LLM engine", value: controller.llmAvailable ? "Qwen3-4B (MLX)" : "Not included in this build")
                 if !controller.llmAvailable {
-                    Text("LLM modes fall back to the instant cleaner until the MLX engine is enabled (see README).")
+                    Text("This build ships without the on-device LLM (a ~2.5 GB model), so the toggle is "
+                         + "off. LLM modes (Email, Message, Code, List) use the instant deterministic cleaner. "
+                         + "To enable the Qwen3-4B rewrite, install the MLX build (README → \u{201C}Enable LLM rewrite\u{201D}).")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
