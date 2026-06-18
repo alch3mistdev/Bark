@@ -23,11 +23,16 @@ swift build -c "$CONFIG" --product Bark
 BIN=".build/$CONFIG/Bark"
 [ -f "$BIN" ] || { echo "✗ binary not found at $BIN"; exit 1; }
 
-echo "▸ Assembling $APP…"
+echo "▸ Generating icon…"
+[ -f Resources/Bark.icns ] || swift scripts/make-icon.swift
+
+echo "▸ Assembling ${APP} ..."
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Bark"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+cp Resources/Bark.icns "$APP/Contents/Resources/Bark.icns"
+printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 echo "▸ Signing with: $SIGN_ID (hardened runtime)…"
 codesign --force --options runtime \

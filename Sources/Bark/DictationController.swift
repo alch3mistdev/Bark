@@ -14,48 +14,147 @@ public final class DictationController {
     public private(set) var liveText: String = ""
     public private(set) var lastError: String?
     public private(set) var isModelReady = false
-    public var modeRegistry = ModeRegistry()
 
     // Collaborators
+    public let settings: SettingsStore
     public let permissions: PermissionsCoordinator
     private let hotkey: HotkeyManager
-    private let audioFactory: @Sendable () -> AudioCaptureEngine
+    private let audioFactory: @Sendable () -> AudioCapturing
     private let stt: STTEngine
     private let basicCleaner = BasicTextCleaner()
     private let llmCleaner: TextCleaner?
     private let pasteInjector: TextInjector
     private let keystrokeInjector: TextInjector
-    private let locale: String
+    private let history: HistoryStore?
+    private let cleanupDeadline: Double
+    private let targetProvider: @MainActor () -> InjectionTarget?
 
     private var machine = DictationStateMachine()
-    private var audio: AudioCaptureEngine?
+    private var audio: AudioCapturing?
     private var feedTask: Task<Void, Never>?
     private var resultTask: Task<Void, Never>?
     private var finalSegments: [String] = []
     private var volatileTail = ""
     private var capturedTarget: InjectionTarget?
+    private var prepareToken = 0
 
     public init(
+        settings: SettingsStore,
         permissions: PermissionsCoordinator,
         hotkey: HotkeyManager,
         stt: STTEngine,
         llmCleaner: TextCleaner?,
-        audioFactory: @escaping @Sendable () -> AudioCaptureEngine = { AudioCaptureEngine() },
+        history: HistoryStore? = nil,
+        audioFactory: @escaping @Sendable () -> AudioCapturing = { AudioCaptureEngine() },
         pasteInjector: TextInjector = PasteboardInjector(),
         keystrokeInjector: TextInjector = KeystrokeInjector(),
-        locale: String = "en-US"
+        cleanupDeadline: Double = 8,
+        targetProvider: @escaping @MainActor () -> InjectionTarget? = { FocusProbe.currentTarget() }
     ) {
+        self.settings = settings
         self.permissions = permissions
         self.hotkey = hotkey
         self.stt = stt
         self.llmCleaner = llmCleaner
+        self.history = history
         self.audioFactory = audioFactory
         self.pasteInjector = pasteInjector
         self.keystrokeInjector = keystrokeInjector
-        self.locale = locale
+        self.cleanupDeadline = cleanupDeadline
+        self.targetProvider = targetProvider
     }
 
     public var llmAvailable: Bool { llmCleaner != nil }
+
+    // MARK: - Settings-derived state (UI binds here; writes persist)
+
+    public var modes: [Mode] { Mode.builtInModes + settings.settings.customModes }
+
+    public var selectedModeID: String {
+        get { settings.settings.selectedModeID }
+        set { settings.update { $0.selectedModeID = newValue } }
+    }
+
+    public var currentMode: Mode { modes.first { $0.id == selectedModeID } ?? .clean }
+
+    public var hotkeySetting: HotkeySetting {
+        get { settings.settings.hotkey }
+        set {
+            settings.update { $0.hotkey = newValue }
+            hotkey.update(HotkeyConfig(newValue))
+        }
+    }
+
+    public func upsertMode(_ mode: Mode) {
+        // A custom id colliding with a built-in would be silently shadowed (ADV-005).
+        guard !Mode.builtInModes.contains(where: { $0.id == mode.id }) else { return }
+        settings.update { s in
+            if let i = s.customModes.firstIndex(where: { $0.id == mode.id }) { s.customModes[i] = mode }
+            else { s.customModes.append(mode) }
+        }
+    }
+
+    public func removeMode(id: String) {
+        guard !Mode.builtInModes.contains(where: { $0.id == id }) else { return }
+        settings.update { s in
+            s.customModes.removeAll { $0.id == id }
+            if s.selectedModeID == id { s.selectedModeID = Mode.clean.id }
+        }
+    }
+
+    public var launchAtLogin: Bool {
+        get { settings.settings.launchAtLogin }
+        set {
+            // Only persist the toggle if the OS actually accepted it; otherwise
+            // reconcile to the real SMAppService state (ADV-002).
+            do {
+                try LoginItemService.setEnabled(newValue)
+                settings.update { $0.launchAtLogin = newValue }
+            } catch {
+                lastError = "Couldn't update launch-at-login (use the installed app)."
+                settings.update { $0.launchAtLogin = LoginItemService.isEnabled }
+            }
+        }
+    }
+
+    public var llmEnabled: Bool {
+        get { settings.settings.llmEnabled }
+        set { settings.update { $0.llmEnabled = newValue } }
+    }
+
+    public var historyEnabled: Bool {
+        get { settings.settings.historyEnabled }
+        set {
+            settings.update { $0.historyEnabled = newValue }
+            // Turning history OFF wipes the stored transcripts + key (ADV-001):
+            // "off" must mean "not retained", matching the spec and UI promise.
+            if !newValue { Task { await purgeHistory() } }
+        }
+    }
+
+    public var localeID: String {
+        get { settings.settings.localeID }
+        set {
+            guard newValue != settings.settings.localeID else { return }
+            settings.update { $0.localeID = newValue }
+            isModelReady = false
+            Task { await prepareModel() }
+        }
+    }
+
+    public func historyRecords() async -> [HistoryRecord] {
+        await history?.all() ?? []
+    }
+
+    public func purgeHistory() async {
+        try? await history?.purge()
+    }
+
+    public var hasCompletedOnboarding: Bool { settings.settings.hasCompletedOnboarding }
+
+    public func completeOnboarding() {
+        settings.update { $0.hasCompletedOnboarding = true }
+    }
 
     /// Minimum permission to dictate (mic). Accessibility/Input-Monitoring are
     /// degradable: without them we still transcribe and copy to the clipboard.
@@ -74,6 +173,7 @@ public final class DictationController {
     /// Bind the hotkey and warm the STT model.
     public func activate() {
         permissions.refresh()
+        hotkey.update(HotkeyConfig(settings.settings.hotkey))   // restore saved hotkey
         hotkey.onStart = { [weak self] in
             Task { @MainActor in self?.startDictation() }
         }
@@ -92,16 +192,24 @@ public final class DictationController {
     }
 
     private func prepareModel() async {
+        prepareToken += 1
+        let token = prepareToken
         do {
-            try await stt.prepare(locale: locale)
+            try await stt.prepare(locale: settings.settings.localeID)
+            guard token == prepareToken else { return }  // a newer locale superseded this
             isModelReady = true
             BarkLog.pipeline.info("model ready")
         } catch {
+            guard token == prepareToken else { return }
             isModelReady = false
             lastError = Self.describe(error)
             BarkLog.pipeline.error("model prepare failed: \(String(describing: error), privacy: .public)")
         }
     }
+
+    /// Warm the STT model without binding the global hotkey (used by tests and
+    /// callers that drive start/stop directly).
+    public func warmModel() async { await prepareModel() }
 
     // MARK: - Start / stop
 
@@ -121,7 +229,7 @@ public final class DictationController {
             return
         }
 
-        capturedTarget = FocusProbe.currentTarget()
+        capturedTarget = targetProvider()
         finalSegments = []
         volatileTail = ""
         liveText = ""
@@ -133,7 +241,7 @@ public final class DictationController {
         Task { await beginPipeline(engine: engine) }
     }
 
-    private func beginPipeline(engine: AudioCaptureEngine) async {
+    private func beginPipeline(engine: AudioCapturing) async {
         // The user may have released/stopped during the async setup gap.
         guard machine.phase == .listening else { engine.stop(); return }
         do {
@@ -189,9 +297,9 @@ public final class DictationController {
             return
         }
 
-        let mode = modeRegistry.selected
+        let mode = currentMode
         let cleaned = await produceText(transcript, mode: mode)
-        await inject(cleaned)
+        await inject(cleaned, transcript: transcript, mode: mode)
     }
 
     // MARK: - Cleanup
@@ -200,14 +308,14 @@ public final class DictationController {
         // Always run the instant deterministic pass first.
         let basic = BasicTextCleaner.process(transcript, mode: mode)
 
-        guard mode.usesLLM, let llm = llmCleaner, await llm.isAvailable else {
+        guard mode.usesLLM, settings.settings.llmEnabled, let llm = llmCleaner, await llm.isAvailable else {
             return basic
         }
 
         machine.handle(.cleanupStarted)
         phase = machine.phase
         do {
-            let rewritten = try await withThrowingDeadline(seconds: 8) {
+            let rewritten = try await withThrowingDeadline(seconds: cleanupDeadline) {
                 try await llm.clean(basic, mode: mode)
             }
             let validated = try OutputValidator.validate(rewritten, against: basic)
@@ -225,8 +333,8 @@ public final class DictationController {
 
     // MARK: - Injection
 
-    private func inject(_ rawText: String) async {
-        let target = capturedTarget ?? FocusProbe.currentTarget()
+    private func inject(_ rawText: String, transcript: String, mode: Mode) async {
+        let target = capturedTarget ?? targetProvider()
         guard let target else { fail("Lost the target window."); return }
 
         // Terminal sinks: keep text only, never anything that could submit.
@@ -248,6 +356,7 @@ public final class DictationController {
             try await injector.inject(sanitized, plan: plan)
             machine.handle(.injected)
             phase = machine.phase
+            recordHistory(transcript: transcript, output: sanitized, mode: mode, target: target)
             reset()
         } catch InjectionError.secureFieldBlocked {
             fail("Refused: a password/secure field is focused.")
@@ -259,6 +368,16 @@ public final class DictationController {
     }
 
     // MARK: - Helpers
+
+    private func recordHistory(transcript: String, output: String, mode: Mode, target: InjectionTarget) {
+        guard settings.settings.historyEnabled, let history else { return }
+        let record = HistoryRecord(transcript: transcript, output: output,
+                                   modeID: mode.id, appBundleID: target.bundleID)
+        Task.detached {
+            do { try await history.append(record) }
+            catch { BarkLog.pipeline.error("history append failed") }
+        }
+    }
 
     private func apply(_ result: STTResult) {
         if result.isFinal {

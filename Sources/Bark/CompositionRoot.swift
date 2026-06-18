@@ -11,9 +11,11 @@ import BarkCleanupMLX
 @MainActor
 enum CompositionRoot {
     static func makeController() -> DictationController {
+        let settings = SettingsStore()
         let permissions = PermissionsCoordinator()
-        let hotkey = HotkeyManager()                 // default: hold fn (Globe) to talk
+        let hotkey = HotkeyManager()                 // restored from settings in activate()
         let stt: STTEngine = SpeechAnalyzerEngine()  // Apple on-device, macOS 26
+        let history: HistoryStore = EncryptedHistoryStore()
 
         let llm: TextCleaner?
         #if MLXCleanup
@@ -23,10 +25,12 @@ enum CompositionRoot {
         #endif
 
         return DictationController(
+            settings: settings,
             permissions: permissions,
             hotkey: hotkey,
             stt: stt,
-            llmCleaner: llm
+            llmCleaner: llm,
+            history: history
         )
     }
 }
