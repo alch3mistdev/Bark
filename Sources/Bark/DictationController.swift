@@ -3,6 +3,15 @@ import Observation
 import BarkCore
 import BarkEngines
 
+/// Lifecycle of the optional on-device rewrite model (for the Settings UI).
+public enum LLMStatus: Equatable, Sendable {
+    case unavailable          // engine not compiled into this build
+    case notLoaded            // engine present; model not downloaded/loaded yet
+    case downloading(Double)  // 0...1
+    case ready
+    case failed(String)
+}
+
 /// The conductor. Wires hotkey → audio capture → STT → cleanup → injection,
 /// driving the pure `DictationStateMachine`. Lives on the main actor; the heavy
 /// work (capture, STT, LLM) runs in engines off the main thread.
@@ -17,6 +26,7 @@ public final class DictationController {
     public private(set) var lastError: String?
     public private(set) var lastResult: String?
     public private(set) var isModelReady = false
+    public private(set) var llmStatus: LLMStatus = .unavailable
 
     /// Side-channel callbacks wired by the app layer (AppKit windows/HUD).
     public var onPhaseChange: (@MainActor (DictationPhase) -> Void)?
@@ -44,6 +54,7 @@ public final class DictationController {
     private var volatileTail = ""
     private var capturedTarget: InjectionTarget?
     private var prepareToken = 0
+    private var llmTask: Task<Void, Never>?
 
     public init(
         settings: SettingsStore,
@@ -69,6 +80,7 @@ public final class DictationController {
         self.keystrokeInjector = keystrokeInjector
         self.cleanupDeadline = cleanupDeadline
         self.targetProvider = targetProvider
+        self.llmStatus = (llmCleaner != nil) ? .notLoaded : .unavailable
     }
 
     public var llmAvailable: Bool { llmCleaner != nil }
@@ -128,7 +140,49 @@ public final class DictationController {
 
     public var llmEnabled: Bool {
         get { settings.settings.llmEnabled }
-        set { settings.update { $0.llmEnabled = newValue } }
+        set {
+            settings.update { $0.llmEnabled = newValue }
+            if newValue {
+                prepareLLM()                       // download/warm the model when opted in
+            } else {
+                llmTask?.cancel(); llmTask = nil    // stop tracking an in-flight download
+                if llmEnginePresent { llmStatus = .notLoaded }
+            }
+        }
+    }
+
+    /// True when the LLM engine is compiled into this build (MLX build).
+    public var llmEnginePresent: Bool { llmCleaner != nil }
+
+    /// Download (first run) + load the rewrite model, updating `llmStatus`. The
+    /// per-utterance deadline never wraps this — it's a separate, observable step.
+    public func prepareLLM() {
+        guard let llm = llmCleaner else { return }
+        switch llmStatus {
+        case .downloading, .ready: return
+        default: break
+        }
+        llmStatus = .downloading(0)
+        llmTask?.cancel()
+        llmTask = Task { [weak self] in
+            do {
+                try await llm.prepare(progress: { fraction in
+                    Task { @MainActor in self?.setDownloadProgress(fraction) }
+                })
+                guard let self, !Task.isCancelled, self.settings.settings.llmEnabled else { return }
+                self.llmStatus = .ready
+            } catch {
+                guard let self, !Task.isCancelled, self.settings.settings.llmEnabled else { return }
+                self.llmStatus = .failed("Download failed: \((error as NSError).localizedDescription)")
+            }
+        }
+    }
+
+    private func setDownloadProgress(_ fraction: Double) {
+        // Monotonic: late/out-of-order progress hops can't make the bar regress.
+        if case .downloading(let current) = llmStatus {
+            llmStatus = .downloading(max(current, fraction))
+        }
     }
 
     public var historyEnabled: Bool {
@@ -198,12 +252,14 @@ public final class DictationController {
         }
         hotkey.start()
         Task { await prepareModel() }
+        if settings.settings.llmEnabled { prepareLLM() }   // warm the model if the user wants the LLM
     }
 
     public func deactivate() {
         hotkey.stop()
         feedTask?.cancel()
         resultTask?.cancel()
+        llmTask?.cancel()
         audio?.stop()
     }
 

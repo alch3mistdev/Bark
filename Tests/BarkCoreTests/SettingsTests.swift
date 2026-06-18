@@ -29,7 +29,7 @@ final class SettingsTests: XCTestCase {
         let decoded = try JSONDecoder().decode(Settings.self, from: Data(json.utf8))
         XCTAssertEqual(decoded.selectedModeID, "code")
         XCTAssertEqual(decoded.localeID, "de-DE")
-        XCTAssertTrue(decoded.llmEnabled)          // default
+        XCTAssertFalse(decoded.llmEnabled)         // default is opt-in (false)
         XCTAssertFalse(decoded.launchAtLogin)      // default
     }
 

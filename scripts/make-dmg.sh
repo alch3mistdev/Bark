@@ -11,6 +11,18 @@ VOL="Bark"
 DMG="dist/Bark.dmg"
 STAGE="build/dmg"
 
+# Opt into the on-device LLM build: BARK_MLX=1 swaps in Package-mlx.swift for the
+# build, then restores the lean default manifest on exit.
+mkdir -p build
+if [ "${BARK_MLX:-0}" = "1" ]; then
+    echo "▸ Flavor: MLX (on-device LLM) — using Package-mlx.swift (pulls mlx-swift-lm; compiles Metal)"
+    cp Package.swift build/Package.swift.bak
+    cp Package-mlx.swift Package.swift
+    trap 'cp build/Package.swift.bak Package.swift; rm -f build/Package.swift.bak' EXIT
+else
+    echo "▸ Flavor: LEAN (no LLM). For the LLM build run:  BARK_MLX=1 scripts/make-dmg.sh"
+fi
+
 # 1) Build the .app
 scripts/make-app.sh "$SIGN_ID"
 

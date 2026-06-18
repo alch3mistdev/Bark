@@ -18,37 +18,36 @@ import Tokenizers
 public actor MLXTextCleaner: TextCleaner {
     private let modelID: String
     private var container: ModelContainer?
-    private var loadFailed = false
 
     public init(modelID: String = "mlx-community/Qwen3-4B-Instruct-2507-4bit") {
         self.modelID = modelID
     }
 
+    /// Ready only once the model is loaded — so the caller never invokes `clean`
+    /// (and the per-utterance deadline) while a multi-GB download is in flight.
     public var isAvailable: Bool {
-        get async { !loadFailed }
+        get async { container != nil }
+    }
+
+    /// Download (first run, ~2.5 GB) + load the model, reporting progress. Safe to
+    /// call repeatedly; a loaded container is reused.
+    public func prepare(progress: @escaping @Sendable (Double) -> Void) async throws {
+        if container != nil { return }
+        // Let the real error propagate (no-network / disk-full / 403) so the UI
+        // can show a useful message rather than a generic one.
+        let model = try await #huggingFaceLoadModelContainer(
+            configuration: ModelConfiguration(id: modelID),
+            progressHandler: { p in progress(p.fractionCompleted) }
+        )
+        container = model
     }
 
     public func clean(_ text: String, mode: Mode) async throws -> String {
-        let model = try await load()
+        // prepare() must have loaded the model; we never download under the deadline.
+        guard let container else { throw CleanupError.modelUnavailable }
         // Fresh session per call → no conversation state bleeds between dictations.
-        let session = ChatSession(model, instructions: PromptTemplate.system(for: mode))
-        let response = try await session.respond(to: PromptTemplate.user(transcript: text))
-        return response
-    }
-
-    private func load() async throws -> ModelContainer {
-        if let container { return container }
-        do {
-            // Default Hugging Face hub client + tokenizer loader, LLM factory.
-            let model = try await #huggingFaceLoadModelContainer(
-                configuration: ModelConfiguration(id: modelID)
-            )
-            container = model
-            return model
-        } catch {
-            loadFailed = true
-            throw CleanupError.modelUnavailable
-        }
+        let session = ChatSession(container, instructions: PromptTemplate.system(for: mode))
+        return try await session.respond(to: PromptTemplate.user(transcript: text))
     }
 }
 

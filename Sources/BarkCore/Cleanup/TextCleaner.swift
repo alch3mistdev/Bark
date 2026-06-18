@@ -7,6 +7,11 @@ public protocol TextCleaner: Sendable {
     /// Whether this cleaner can run right now (e.g. model loaded).
     var isAvailable: Bool { get async }
 
+    /// Load/download any backing model, reporting 0...1 progress. Deterministic
+    /// cleaners have nothing to load (default no-op). Kept separate from `clean`
+    /// so a slow first-time download never trips the per-utterance deadline.
+    func prepare(progress: @escaping @Sendable (Double) -> Void) async throws
+
     /// Produce the cleaned text. Must be faithful: never invent content.
     func clean(_ text: String, mode: Mode) async throws -> String
 
@@ -16,6 +21,9 @@ public protocol TextCleaner: Sendable {
 }
 
 public extension TextCleaner {
+    /// Default: nothing to load.
+    func prepare(progress: @escaping @Sendable (Double) -> Void) async throws {}
+
     func cleanStream(_ text: String, mode: Mode) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
