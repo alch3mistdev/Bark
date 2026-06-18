@@ -48,7 +48,7 @@ struct OnboardingView: View {
             }
         }
         .padding(24)
-        .frame(width: 460)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onAppear { controller.refreshPermissions() }
     }
 }
