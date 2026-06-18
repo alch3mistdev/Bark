@@ -10,6 +10,8 @@
     <string>com.bark.app</string>
     <key>CFBundleExecutable</key>
     <string>Bark</string>
+    <key>CFBundleIconFile</key>
+    <string>Bark</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

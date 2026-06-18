@@ -41,6 +41,17 @@ public final class PermissionsCoordinator {
         inputMonitoring = CGPreflightListenEventAccess() ? .granted : .denied
     }
 
+    #if DEBUG
+    /// Test seam: force permission states without touching real TCC.
+    public func overrideForTesting(microphone: PermissionState? = nil,
+                                   accessibility: PermissionState? = nil,
+                                   inputMonitoring: PermissionState? = nil) {
+        if let microphone { self.microphone = microphone }
+        if let accessibility { self.accessibility = accessibility }
+        if let inputMonitoring { self.inputMonitoring = inputMonitoring }
+    }
+    #endif
+
     public func state(of kind: PermissionKind) -> PermissionState {
         switch kind {
         case .microphone: return microphone

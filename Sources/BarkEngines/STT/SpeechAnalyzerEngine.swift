@@ -1,5 +1,5 @@
 import Foundation
-import AVFoundation
+@preconcurrency import AVFoundation
 import Speech
 import BarkCore
 
@@ -154,11 +154,11 @@ public actor SpeechAnalyzerEngine: STTEngine {
         let ratio = format.sampleRate / input.format.sampleRate
         let capacity = AVAudioFrameCount(Double(input.frameLength) * ratio + 16)
         guard let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return nil }
-        var supplied = false
+        let gate = ConverterGate()
         var error: NSError?
         let status = converter.convert(to: out, error: &error) { _, inStatus in
-            if supplied { inStatus.pointee = .noDataNow; return nil }
-            supplied = true
+            if gate.supplied { inStatus.pointee = .noDataNow; return nil }
+            gate.supplied = true
             inStatus.pointee = .haveData
             return input
         }

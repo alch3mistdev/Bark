@@ -30,5 +30,6 @@ let package = Package(
             dependencies: ["BarkCore", "BarkEngines", "BarkCleanupMLX"]
         ),
         .testTarget(name: "BarkCoreTests", dependencies: ["BarkCore"]),
+        .testTarget(name: "BarkAppTests", dependencies: ["Bark", "BarkEngines", "BarkCore"]),
     ]
 )

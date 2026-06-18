@@ -55,8 +55,8 @@ struct MenuContentView: View {
     }
 
     private var modePicker: some View {
-        Picker("Mode", selection: $controller.modeRegistry.selectedID) {
-            ForEach(controller.modeRegistry.modes) { mode in
+        Picker("Mode", selection: $controller.selectedModeID) {
+            ForEach(controller.modes) { mode in
                 Label(mode.name, systemImage: mode.symbol).tag(mode.id)
             }
         }

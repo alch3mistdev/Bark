@@ -43,5 +43,6 @@ let package = Package(
             swiftSettings: [.define("MLXCleanup")]
         ),
         .testTarget(name: "BarkCoreTests", dependencies: ["BarkCore"]),
+        .testTarget(name: "BarkAppTests", dependencies: ["Bark", "BarkEngines", "BarkCore"]),
     ]
 )

@@ -40,10 +40,15 @@ code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the nex
 - ☑ Hardened runtime; no `get-task-allow`, no `disable-library-validation`; Library Validation on.
   (T-013) — enforced by `scripts/make-app.sh` (`--options runtime`).
 
-## Transcript at rest
-- ☑ No history is stored in this build (history is a later, opt-in feature).
-- ☐ When history ships: AES-256-GCM with a Keychain (Secure Enclave) key, off by default, retention +
-  auto-purge, `isExcludedFromBackup`, excluded from Spotlight, `0600` perms. (SEC-006 / T-008)
+## Transcript at rest  (`EncryptedHistoryStore`)
+- ☑ History is **off by default** (`Settings.historyEnabled == false`); nothing is persisted unless the
+  user opts in. Turning it back **off purges** the file and key (`historyEnabled` setter → `purge()`).
+- ☑ When enabled: **AES-256-GCM** (CryptoKit), key in the **Keychain**
+  (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, device-bound, non-syncing). File is `0600`, written
+  atomically with `.completeFileProtection`, and `isExcludedFromBackup`. Retention cap via
+  `RetentionPolicy`. `purge()` removes both file and key. (SEC-006 / T-008)
+- Note (honest scope): the Keychain key is a **software key, not Secure-Enclave-backed**; Spotlight
+  exclusion is **not** implemented. Decrypt failure is treated as empty (see L-6).
 
 ## Memory hygiene
 - ☐ Zero audio/intermediate text buffers after use; disable core dumps for capture. (SEC-009 / T-003)
@@ -69,5 +74,9 @@ documented rather than hidden:
 - **L-4 — Clipboard restore is timer-based (250 ms).** If the target app consumes the paste later, or
   itself rewrites the pasteboard, restore may be skipped (transcript not wiped) or fire early. Guarded
   by `changeCount` to avoid clobbering a user copy.
-- **L-5 — Runtime controls are not unit-tested.** Unit tests cover pure logic only; the live AX/CGEvent/
-  pasteboard/SpeechAnalyzer behavior needs interactive/integration testing on-device.
+- **L-5 — Runtime OS-adapter effectiveness is integration-tested at the seam, not end-to-end.** The
+  controller orchestration is unit-tested with fakes (`BarkAppTests`); the live AX/CGEvent/pasteboard/
+  SpeechAnalyzer behavior still needs interactive testing on-device.
+- **L-6 — History decrypt failure is treated as empty.** A transient Keychain miss or partial-write
+  corruption makes `all()` return `[]`, and the next append overwrites the file — i.e. opt-in history
+  is best-effort convenience storage, not a durable archive.

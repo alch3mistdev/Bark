@@ -31,9 +31,18 @@ public final class HotkeyManager: @unchecked Sendable {
 
     private var holding = false   // push-to-talk currently held
     private var toggled = false   // toggle currently on
+    private let stateLock = NSLock()  // guards config/holding/toggled across UI ↔ tap thread
 
     public init(config: HotkeyConfig = .init()) {
         self.config = config
+    }
+
+    /// Reconfigure the trigger live (e.g. user rebinds the hotkey in Settings).
+    public func update(_ config: HotkeyConfig) {
+        stateLock.lock(); defer { stateLock.unlock() }
+        self.config = config
+        holding = false
+        toggled = false
     }
 
     public func start() {
@@ -68,10 +77,12 @@ public final class HotkeyManager: @unchecked Sendable {
             (1 << CGEventType.keyUp.rawValue)
 
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
+        // .defaultTap (not listenOnly) so we can CONSUME a matched toggle key —
+        // otherwise the toggle keypress would also reach the focused app (Codex).
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .listenOnly,
+            options: .defaultTap,
             eventsOfInterest: mask,
             callback: hotkeyTapCallback,
             userInfo: selfPtr
@@ -88,17 +99,18 @@ public final class HotkeyManager: @unchecked Sendable {
         CFRunLoopRun()
     }
 
-    // Called on the tap thread. Keep it tiny.
-    fileprivate func handle(type: CGEventType, event: CGEvent) {
+    // Called on the tap thread. Keep it tiny. Returns true to CONSUME the event.
+    fileprivate func handle(type: CGEventType, event: CGEvent) -> Bool {
         // Recover if the system disabled our tap (slow callback / heavy load).
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
-            return
+            return false
         }
 
+        stateLock.lock(); defer { stateLock.unlock() }
         switch config.trigger {
         case .modifierHold(let flag):
-            guard type == .flagsChanged else { return }
+            guard type == .flagsChanged else { return false }
             let on = event.flags.contains(flag)
             if on && !holding {
                 holding = true
@@ -107,13 +119,41 @@ public final class HotkeyManager: @unchecked Sendable {
                 holding = false
                 onStop?()
             }
+            return false  // never consume modifier events (system-wide)
 
         case .keyToggle(let key):
-            guard type == .keyDown else { return }
+            guard type == .keyDown || type == .keyUp else { return false }
             let code = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
-            guard code == key, event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return }
+            guard code == key else { return false }
+            if type == .keyUp { return true }  // swallow the matching key-up too
+            guard event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return true }
             toggled.toggle()
             if toggled { onStart?() } else { onStop?() }
+            return true  // consume so the hotkey never reaches the focused app
+        }
+    }
+}
+
+// MARK: - Persisted-setting bridge
+
+public extension HotkeyConfig {
+    init(_ setting: HotkeySetting) {
+        switch setting.kind {
+        case .modifierHold:
+            self.init(trigger: .modifierHold(CGEventFlags(rawValue: setting.modifierFlags)))
+        case .keyToggle:
+            self.init(trigger: .keyToggle(CGKeyCode(setting.keyCode)))
+        }
+    }
+}
+
+public extension HotkeySetting {
+    init(_ config: HotkeyConfig) {
+        switch config.trigger {
+        case .modifierHold(let flags):
+            self.init(kind: .modifierHold, keyCode: 0, modifierFlags: flags.rawValue)
+        case .keyToggle(let key):
+            self.init(kind: .keyToggle, keyCode: UInt16(key), modifierFlags: 0)
         }
     }
 }
@@ -127,7 +167,9 @@ private func hotkeyTapCallback(
 ) -> Unmanaged<CGEvent>? {
     if let userInfo {
         let manager = Unmanaged<HotkeyManager>.fromOpaque(userInfo).takeUnretainedValue()
-        manager.handle(type: type, event: event)
+        if manager.handle(type: type, event: event) {
+            return nil   // consume the matched hotkey
+        }
     }
-    return Unmanaged.passUnretained(event) // listenOnly: pass through unchanged
+    return Unmanaged.passUnretained(event) // pass everything else through unchanged
 }

@@ -24,11 +24,30 @@ struct BarkApp: App {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let controller = CompositionRoot.makeController()
+    private var onboardingWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Menu-bar utility: no Dock icon, no main window.
         NSApp.setActivationPolicy(.accessory)
         controller.activate()
+        if !controller.hasCompletedOnboarding {
+            showOnboarding()
+        }
+    }
+
+    private func showOnboarding() {
+        let view = OnboardingView(controller: controller) { [weak self] in
+            self?.onboardingWindow?.close()
+            self?.onboardingWindow = nil
+        }
+        let window = NSWindow(contentViewController: NSHostingController(rootView: view))
+        window.title = "Welcome to Bark"
+        window.styleMask = [.titled, .closable]
+        window.isReleasedWhenClosed = false
+        window.center()
+        onboardingWindow = window
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
 }
 

@@ -1,5 +1,5 @@
 import Foundation
-import AVFoundation
+@preconcurrency import AVFoundation
 import BarkCore
 
 /// Captures the microphone and emits 16 kHz mono Float32 `AudioFrames`.
@@ -12,7 +12,13 @@ import BarkCore
 /// The tap does bounded, pre-allocated conversion and a non-blocking ring write;
 /// a separate consumer Task drains the ring and yields frames. Mic is opened only
 /// while dictating and fully torn down on `stop()` (T-002 / T-012).
-public final class AudioCaptureEngine: @unchecked Sendable {
+/// One-shot flag for `AVAudioConverter` input blocks (Swift 6 treats them as
+/// `@Sendable`, so a captured `var` would warn; a class property does not).
+final class ConverterGate: @unchecked Sendable {
+    var supplied = false
+}
+
+public final class AudioCaptureEngine: AudioCapturing, @unchecked Sendable {
     public static let targetSampleRate: Double = 16_000
 
     private let engine = AVAudioEngine()
@@ -101,14 +107,14 @@ public final class AudioCaptureEngine: @unchecked Sendable {
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 16)
         guard let out = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else { return }
 
-        var supplied = false
+        let gate = ConverterGate()
         var error: NSError?
         let status = converter.convert(to: out, error: &error) { _, inStatus in
-            if supplied {
+            if gate.supplied {
                 inStatus.pointee = .noDataNow
                 return nil
             }
-            supplied = true
+            gate.supplied = true
             inStatus.pointee = .haveData
             return buffer
         }
