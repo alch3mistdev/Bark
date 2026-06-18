@@ -34,6 +34,32 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/Bark.icns "$APP/Contents/Resources/Bark.icns"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
+# Copy SwiftPM resource bundles (tokenizers, crypto) next to the binary.
+# No-op for the lean build (no dependency bundles).
+for b in ".build/$CONFIG"/*.bundle; do
+    [ -e "$b" ] || continue
+    cp -R "$b" "$APP/Contents/Resources/"
+    echo "  bundled $(basename "$b")"
+done
+
+# MLX build: SwiftPM does NOT compile mlx-swift's Metal kernels into a metallib
+# (Xcode would), so the app crashes at runtime hunting for default.metallib. We
+# compile it ourselves and place it in the bundle MLX looks for (device.cpp).
+MLX_SRC=".build/checkouts/mlx-swift/Source/Cmlx"
+if grep -q '"MLXCleanup"' Package.swift 2>/dev/null && [ -d "$MLX_SRC/mlx-generated/metal" ]; then
+    echo "▸ Compiling MLX default.metallib (SwiftPM doesn't)…"
+    MTL_RES="$APP/Contents/Resources/mlx-swift_Cmlx.bundle/Contents/Resources"
+    mkdir -p "$MTL_RES"
+    xcrun -sdk macosx metal -Wno-everything -fno-fast-math \
+        -I "$MLX_SRC/mlx-generated/metal" \
+        -I "$MLX_SRC/mlx/mlx/backend/metal/kernels" \
+        -I "$MLX_SRC/mlx" \
+        "$MLX_SRC"/mlx-generated/metal/*.metal \
+        -o "$MTL_RES/default.metallib"
+    cp "$MTL_RES/default.metallib" "$APP/Contents/Resources/mlx-swift_Cmlx.bundle/default.metallib"
+    echo "  metallib: $(stat -f%z "$MTL_RES/default.metallib") bytes"
+fi
+
 echo "▸ Signing with: $SIGN_ID (hardened runtime)…"
 codesign --force --options runtime \
     --entitlements Resources/Bark.entitlements \

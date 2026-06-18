@@ -252,7 +252,8 @@ public final class DictationController {
         }
         hotkey.start()
         Task { await prepareModel() }
-        if settings.settings.llmEnabled { prepareLLM() }   // warm the model if the user wants the LLM
+        // The LLM model is loaded lazily on first LLM-mode use (see produceText),
+        // never at launch — so a model-load failure can't block app startup.
     }
 
     public func deactivate() {
@@ -380,6 +381,15 @@ public final class DictationController {
     private func produceText(_ transcript: String, mode: Mode) async -> String {
         // Always run the instant deterministic pass first.
         let basic = BasicTextCleaner.process(transcript, mode: mode)
+
+        // Lazily load the model on first LLM-mode use (non-blocking; this
+        // utterance falls back to deterministic until it's ready).
+        if mode.usesLLM, settings.settings.llmEnabled, llmEnginePresent {
+            switch llmStatus {
+            case .notLoaded, .failed: prepareLLM()
+            default: break
+            }
+        }
 
         guard mode.usesLLM, settings.settings.llmEnabled, let llm = llmCleaner, await llm.isAvailable else {
             return basic
