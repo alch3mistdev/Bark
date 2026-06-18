@@ -14,10 +14,8 @@ struct BarkApp: App {
                 .accessibilityLabel("Bark — \(delegate.controller.phase.title)")
         }
         .menuBarExtraStyle(.window)
-
-        Settings {
-            SettingsView(controller: delegate.controller)
-        }
+        // No SwiftUI `Settings` scene: in a menu-bar .accessory app it opens
+        // unfocused/unreliably. Settings is shown via WindowManager instead.
     }
 }
 
@@ -25,10 +23,14 @@ struct BarkApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let controller = CompositionRoot.makeController()
     private var onboardingWindow: NSWindow?
+    private lazy var windowManager = WindowManager(controller: controller)
+    private lazy var hud = RecordingHUDController(controller: controller)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Menu-bar utility: no Dock icon, no main window.
         NSApp.setActivationPolicy(.accessory)
+        controller.onOpenSettings = { [weak self] in self?.windowManager.openSettings() }
+        controller.onPhaseChange = { [weak self] phase in self?.hud.handlePhase(phase) }
         controller.activate()
         if !controller.hasCompletedOnboarding {
             showOnboarding()

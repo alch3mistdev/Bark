@@ -4,7 +4,6 @@ import BarkEngines
 
 struct MenuContentView: View {
     @Bindable var controller: DictationController
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -24,6 +23,23 @@ struct MenuContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
                     .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+            } else if !controller.phase.isActive, let last = controller.lastResult {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(last)
+                        .font(.callout)
+                        .lineLimit(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(last, forType: .string)
+                    } label: {
+                        Label("Copy last", systemImage: "doc.on.doc")
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                }
+                .padding(8)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
 
             if let error = controller.lastError {
@@ -89,7 +105,7 @@ struct MenuContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
-            Button("Settings…") { openSettings() }
+            Button("Settings…") { controller.requestOpenSettings() }
                 .buttonStyle(.link)
             Button("Quit") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.link)

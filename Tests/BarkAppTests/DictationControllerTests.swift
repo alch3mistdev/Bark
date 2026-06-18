@@ -99,6 +99,23 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(c.phase, .idle) // reset
     }
 
+    // Regression (Codex): rebinding the hotkey while listening must cancel the
+    // live session, not strand it on the old key.
+    func testRebindHotkeyWhileListeningCancels() async {
+        let injector = FakeInjector()
+        let c = make(injector: injector, mode: "clean")
+        await c.warmModel()
+        c.startDictation()
+        try? await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(c.phase, .listening)
+
+        c.hotkeySetting = HotkeySetting(kind: .keyToggle, keyCode: 96, modifierFlags: 0)
+        await waitForTerminal(c)
+
+        XCTAssertFalse(c.phase.isActive)   // not stuck listening
+        XCTAssertEqual(injector.count, 0)  // session cancelled, nothing injected
+    }
+
     func testRestartAfterFailureSucceeds() async {
         // First injection fails (secure); the next must still work — proves the
         // failed-state reset path (ADV-005 / Codex).

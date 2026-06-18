@@ -124,9 +124,15 @@ Bark (SwiftUI MenuBarExtra)
 
 ## Daily-driver features
 
+- **Settings open from the menu bar** (a real AppKit window — the SwiftUI `Settings` scene is
+  unreliable in a menu-bar app, so Bark hosts its own and brings it to the front).
+- **Live recording HUD** — a floating, non-activating overlay shows state + the partial transcript
+  while you dictate (never steals focus from the app you're typing into).
 - **Settings persist** (UserDefaults): selected mode, language, hotkey, custom modes, toggles.
 - **Launch at login** (`SMAppService`) — toggle in Settings → General.
-- **Configurable hotkey** — record a modifier-hold (push-to-talk) or a function-key toggle.
+- **Configurable hotkey** — Settings → Hotkey: **Hold fn** (push-to-talk) or record a **function key**
+  (F1–F20) to toggle. (Plain ⌘/⌥/⌃ holds aren't offered — they'd fire on every normal shortcut.)
+- **Menu shows the last result** with one-click Copy; subtle start/insert sounds (toggleable).
 - **Custom modes** — add your own rewrite modes (name + system prompt) alongside the built-ins.
 - **Encrypted, opt-in history** — off by default; when on, transcripts are AES-256-GCM encrypted
   (key in the Keychain). Turning it **off purges** the store.

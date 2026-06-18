@@ -57,6 +57,9 @@ private struct GeneralPane: View {
             Section("Startup") {
                 Toggle("Launch Bark at login", isOn: $controller.launchAtLogin)
             }
+            Section("Feedback") {
+                Toggle("Play start / insert sounds", isOn: $controller.soundFeedback)
+            }
         }
         .formStyle(.grouped)
     }
@@ -66,16 +69,38 @@ private struct GeneralPane: View {
 
 private struct HotkeyPane: View {
     @Bindable var controller: DictationController
+    // UI selection is local so "Custom" can show the recorder WITHOUT first
+    // overwriting the persisted hotkey (the recorder commits the real key).
+    @State private var mode: HotkeyPreset = .fn
 
     var body: some View {
         Form {
-            Section("Push-to-talk / toggle") {
-                HotkeyRecorder(setting: $controller.hotkeySetting)
-                Text("Hold a modifier (e.g. fn) to push-to-talk, or record a single key to toggle dictation on/off.")
+            Section("Trigger") {
+                Picker("Hotkey", selection: $mode) {
+                    ForEach(HotkeyPreset.allCases) { Text($0.label).tag($0) }
+                }
+                .disabled(controller.phase.isActive)
+                .onChange(of: mode) { _, newValue in
+                    if newValue == .fn {
+                        controller.hotkeySetting = HotkeyPreset.fn.setting(currentCustom: controller.hotkeySetting)
+                    }
+                    // .custom → wait for the recorder to capture a key; don't apply a placeholder.
+                }
+
+                if mode == .custom {
+                    LabeledContent("Toggle key") {
+                        HotkeyRecorder(setting: $controller.hotkeySetting)
+                    }
+                    .disabled(controller.phase.isActive)
+                }
+
+                Text("Hold fn to push-to-talk (release to insert), or pick Custom and record a function "
+                     + "key (F1–F20) to toggle dictation on/off. Changes apply immediately.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+        .onAppear { mode = HotkeyPreset.from(controller.hotkeySetting) }
     }
 }
 

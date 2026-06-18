@@ -23,7 +23,7 @@ struct HotkeyRecorder: View {
 
     private func start() {
         recording = true
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
             handle(event)
             return nil   // swallow while recording
         }
@@ -36,36 +36,17 @@ struct HotkeyRecorder: View {
     }
 
     private func handle(_ event: NSEvent) {
-        switch event.type {
-        case .keyDown:
-            // Only function/navigation keys may be a toggle: a printable key would
-            // be consumed globally and become untypable. Ignore others (keep listening).
-            guard isAllowedToggleKey(event) else { return }
-            setting = HotkeySetting(kind: .keyToggle, keyCode: UInt16(event.keyCode), modifierFlags: 0)
-            stop()
-        case .flagsChanged:
-            let flags = cgFlag(from: event.modifierFlags)
-            if flags != 0 {
-                setting = HotkeySetting(kind: .modifierHold, keyCode: 0, modifierFlags: flags)
-                stop()
-            }
-        default:
-            break
-        }
+        // Modifier-hold triggers are chosen via the preset picker; the recorder
+        // only captures a function/navigation key as a toggle (a printable key
+        // would be consumed globally and become untypable).
+        guard event.type == .keyDown, isAllowedToggleKey(event) else { return }
+        setting = HotkeySetting(kind: .keyToggle, keyCode: UInt16(event.keyCode), modifierFlags: 0)
+        stop()
     }
 
     /// Function/navigation keys live in the 0xF700–0xF8FF private-use range.
     private func isAllowedToggleKey(_ event: NSEvent) -> Bool {
-        guard let scalar = event.charactersIgnoringModifiers?.unicodeScalars.first else { return true }
+        guard let scalar = event.charactersIgnoringModifiers?.unicodeScalars.first else { return false }
         return scalar.value >= 0xF700
-    }
-
-    private func cgFlag(from flags: NSEvent.ModifierFlags) -> UInt64 {
-        if flags.contains(.function) { return HotkeySetting.fnFlag }
-        if flags.contains(.command)  { return 0x100000 }
-        if flags.contains(.option)   { return 0x80000 }
-        if flags.contains(.control)  { return 0x40000 }
-        if flags.contains(.shift)    { return 0x20000 }
-        return 0
     }
 }
