@@ -51,6 +51,7 @@ public struct Settings: Codable, Sendable, Equatable {
     public var historyEnabled: Bool
     public var llmEnabled: Bool
     public var restoreClipboard: Bool
+    public var soundFeedback: Bool
     public var hasCompletedOnboarding: Bool
 
     public init(
@@ -62,6 +63,7 @@ public struct Settings: Codable, Sendable, Equatable {
         historyEnabled: Bool = false,
         llmEnabled: Bool = true,
         restoreClipboard: Bool = true,
+        soundFeedback: Bool = true,
         hasCompletedOnboarding: Bool = false
     ) {
         self.selectedModeID = selectedModeID
@@ -72,6 +74,7 @@ public struct Settings: Codable, Sendable, Equatable {
         self.historyEnabled = historyEnabled
         self.llmEnabled = llmEnabled
         self.restoreClipboard = restoreClipboard
+        self.soundFeedback = soundFeedback
         self.hasCompletedOnboarding = hasCompletedOnboarding
     }
 
@@ -89,6 +92,7 @@ public struct Settings: Codable, Sendable, Equatable {
         historyEnabled = try c.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? d.historyEnabled
         llmEnabled = try c.decodeIfPresent(Bool.self, forKey: .llmEnabled) ?? d.llmEnabled
         restoreClipboard = try c.decodeIfPresent(Bool.self, forKey: .restoreClipboard) ?? d.restoreClipboard
+        soundFeedback = try c.decodeIfPresent(Bool.self, forKey: .soundFeedback) ?? d.soundFeedback
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? d.hasCompletedOnboarding
     }
 

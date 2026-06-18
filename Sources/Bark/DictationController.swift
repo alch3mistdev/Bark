@@ -10,10 +10,17 @@ import BarkEngines
 @Observable
 public final class DictationController {
     // Observable UI state
-    public private(set) var phase: DictationPhase = .idle
+    public private(set) var phase: DictationPhase = .idle {
+        didSet { onPhaseChange?(phase) }
+    }
     public private(set) var liveText: String = ""
     public private(set) var lastError: String?
+    public private(set) var lastResult: String?
     public private(set) var isModelReady = false
+
+    /// Side-channel callbacks wired by the app layer (AppKit windows/HUD).
+    public var onPhaseChange: (@MainActor (DictationPhase) -> Void)?
+    public var onOpenSettings: (@MainActor () -> Void)?
 
     // Collaborators
     public let settings: SettingsStore
@@ -80,6 +87,8 @@ public final class DictationController {
     public var hotkeySetting: HotkeySetting {
         get { settings.settings.hotkey }
         set {
+            // Rebinding mid-session would strand a live session on the old key (Codex).
+            if machine.isActive { cancelDictation() }
             settings.update { $0.hotkey = newValue }
             hotkey.update(HotkeyConfig(newValue))
         }
@@ -161,6 +170,13 @@ public final class DictationController {
     public var permissionsReady: Bool { permissions.microphone == .granted }
 
     public func refreshPermissions() { permissions.refresh() }
+
+    public func requestOpenSettings() { onOpenSettings?() }
+
+    public var soundFeedback: Bool {
+        get { settings.settings.soundFeedback }
+        set { settings.update { $0.soundFeedback = newValue } }
+    }
 
     public func requestPermission(_ kind: PermissionKind) {
         switch kind {
@@ -247,6 +263,7 @@ public final class DictationController {
         do {
             let sttStream = try await stt.beginStream()
             guard machine.phase == .listening else { engine.stop(); await stt.cancel(); return }
+            if soundFeedback { Feedback.started() }   // pre-roll BEFORE the mic opens (no bleed)
             let audioStream = try engine.start()
             machine.handle(.audioStarted)
 
@@ -356,6 +373,8 @@ public final class DictationController {
             try await injector.inject(sanitized, plan: plan)
             machine.handle(.injected)
             phase = machine.phase
+            lastResult = sanitized
+            if soundFeedback { Feedback.inserted() }
             recordHistory(transcript: transcript, output: sanitized, mode: mode, target: target)
             reset()
         } catch InjectionError.secureFieldBlocked {
@@ -402,6 +421,18 @@ public final class DictationController {
     private func reset() {
         feedTask = nil; resultTask = nil
         audio = nil
+        machine.handle(.reset)
+        phase = machine.phase
+        liveText = ""
+    }
+
+    /// Stop a live session immediately (e.g. user rebinds the hotkey mid-dictation).
+    public func cancelDictation() {
+        guard machine.isActive else { return }
+        feedTask?.cancel(); resultTask?.cancel()
+        feedTask = nil; resultTask = nil
+        audio?.stop(); audio = nil
+        Task { await stt.cancel() }
         machine.handle(.reset)
         phase = machine.phase
         liveText = ""
