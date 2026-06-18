@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Bark ships NON-SANDBOXED + hardened-runtime, Developer-ID notarized.
+      App Sandbox is incompatible with the global CGEventTap hotkey and
+      Accessibility text injection this app requires (ADR-001 / ADR-005 / ARCH-006).
+
+      Least privilege (SEC-008 / T-011 / T-013):
+        - Microphone is the only device entitlement.
+        - NO get-task-allow, NO disable-library-validation in release.
+        - Library Validation stays ON.
+        - Accessibility + Input Monitoring are granted by the user via TCC at
+          runtime (not entitlements).
+    -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+</dict>
+</plist>

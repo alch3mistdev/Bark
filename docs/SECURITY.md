@@ -1,0 +1,73 @@
+# Bark — Security & Privacy
+
+Threat model from the design phase (ef-security, STRIDE). Below: the controls and where they live in
+code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the next sections).
+
+## Offline guarantee
+- ☑ No networking code anywhere in the app at runtime. The only network event is the OS installing the
+  SpeechAnalyzer locale asset on first use (`AssetInventory`, `SpeechAnalyzerEngine.prepare`).
+- ☑ No analytics / telemetry / crash-reporting SDKs. `BarkLog` never logs transcript or audio content.
+- ☐ A future downloaded-model path (Parakeet/MLX weights) must sha256-verify against a signed manifest
+  over TLS before load (SEC-003 / T-010).
+
+## Microphone privacy
+- ☑ Mic opened only during active dictation; `AVAudioEngine` fully torn down on `stop()`
+  (`AudioCaptureEngine.stop`). No always-listening mode. (T-002 / T-012)
+- ☑ Persistent in-app state (menu-bar icon reflects `listening`), plus the macOS orange indicator.
+
+## Text-injection safety  (`BarkEngines/Inject/*`, `BarkCore/Inject/*`)
+- ☑ Refuse injection when `IsSecureEventInputEnabled()` or the focused AX element is `AXSecureTextField`
+  (`SecureFieldPolicy` + `SecureFieldDetector`). (SEC-002 / T-005) — **best-effort**, see L-2.
+- ☑ Re-verify the focused app (PID) is unchanged immediately before injecting (`FocusGuard` +
+  `FocusProbe`); abort on mismatch. (SEC-004 / T-004) — **app-level**, see L-1.
+- ☑ Never synthesize Return/Enter; strip trailing newlines; for terminals, strip all newlines and use
+  keystroke injection. (`TextSanitizer`, `KeystrokeInjector`, `TerminalDetector`) (SEC-005 / T-006)
+- ☑ Sanitize C0/C1 controls, ANSI escapes, zero-width and bidi characters before injection.
+  (`TextSanitizer`) (SEC-011 / T-014)
+- ☑ Full-pasteboard snapshot + restore with a `changeCount` guard; injected payload marked
+  `org.nspasteboard.ConcealedType`. (`PasteboardInjector`) (ARCH-001 / SEC-007 / T-007)
+
+## Prompt-injection / LLM output  (`BarkCore/Cleanup/*`)
+- ☑ Dictation is fenced as untrusted data inside `<transcript>` with an explicit guardrail; injected
+  close-tags are neutralized (`PromptTemplate`). (AIML-002 / SEC-010)
+- ☑ LLM output is length-bounded (`OutputValidator`) and passes the same injection sanitization as raw
+  text; it is text only, never executed. (AIML-001/004 / SEC-011)
+- ☑ Fresh stateless session per rewrite — no conversation state bleeds across dictations.
+
+## Permissions — least privilege  (`Resources/Bark.entitlements`, `PermissionsCoordinator`)
+- ☑ Only the microphone device entitlement. Accessibility + Input Monitoring are user-granted via TCC,
+  requested just-in-time with purpose strings. (SEC-008 / T-011)
+- ☑ Hardened runtime; no `get-task-allow`, no `disable-library-validation`; Library Validation on.
+  (T-013) — enforced by `scripts/make-app.sh` (`--options runtime`).
+
+## Transcript at rest
+- ☑ No history is stored in this build (history is a later, opt-in feature).
+- ☐ When history ships: AES-256-GCM with a Keychain (Secure Enclave) key, off by default, retention +
+  auto-purge, `isExcludedFromBackup`, excluded from Spotlight, `0600` perms. (SEC-006 / T-008)
+
+## Memory hygiene
+- ☐ Zero audio/intermediate text buffers after use; disable core dumps for capture. (SEC-009 / T-003)
+
+## Known limitations (from adversarial review — Codex GPT-5.4 + ef-adversary)
+
+These are inherent to synthetic injection / cross-app automation, or accepted for v1. They are
+documented rather than hidden:
+
+- **L-1 — Focus guard is app-level (PID), not window/field.** A focus change to a *different window or
+  field within the same app* during STT/LLM latency is not detected (`FocusGuard.targetUnchanged`
+  compares PID). Cross-app switches are caught. Stable per-field AX identity across the new
+  SpeechAnalyzer latency is unreliable; closing this fully would require refusing common valid use.
+- **L-2 — Secure-field detection is best-effort.** `IsSecureEventInputEnabled()` is session-global (can
+  cause false refusals if another app holds secure input) and `AXSecureTextField` is the only field
+  signal. **Web/Electron/custom password fields that don't trip either are not detected** — do not rely
+  on Bark to refuse every password field.
+- **L-3 — Multi-line paste into an *unrecognized* terminal.** Known terminals (`TerminalDetector`) get
+  single-line keystroke injection. For other apps, a paste containing interior newlines relies on the
+  terminal's **bracketed-paste mode** (default-on in modern shells/terminals) to avoid executing lines.
+  Integrated terminals (e.g. VS Code's) share their editor's bundle ID and can't be distinguished.
+  Hard guarantee that holds everywhere: **Bark never synthesizes Return/Enter.**
+- **L-4 — Clipboard restore is timer-based (250 ms).** If the target app consumes the paste later, or
+  itself rewrites the pasteboard, restore may be skipped (transcript not wiped) or fire early. Guarded
+  by `changeCount` to avoid clobbering a user copy.
+- **L-5 — Runtime controls are not unit-tested.** Unit tests cover pure logic only; the live AX/CGEvent/
+  pasteboard/SpeechAnalyzer behavior needs interactive/integration testing on-device.
