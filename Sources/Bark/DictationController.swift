@@ -45,6 +45,7 @@ public final class DictationController {
     private let llmCleaner: TextCleaner?
     private let pasteInjector: TextInjector
     private let keystrokeInjector: TextInjector
+    private let clipboardInjector: TextInjector
     private let history: HistoryStore?
     private let cleanupDeadline: Double
     private let targetProvider: @MainActor () -> InjectionTarget?
@@ -72,6 +73,7 @@ public final class DictationController {
         audioFactory: @escaping @Sendable () -> AudioCapturing = { AudioCaptureEngine() },
         pasteInjector: TextInjector = PasteboardInjector(),
         keystrokeInjector: TextInjector = KeystrokeInjector(),
+        clipboardInjector: TextInjector = ClipboardInjector(),
         cleanupDeadline: Double = 8,
         targetProvider: @escaping @MainActor () -> InjectionTarget? = { FocusProbe.currentTarget() }
     ) {
@@ -85,6 +87,7 @@ public final class DictationController {
         self.audioFactory = audioFactory
         self.pasteInjector = pasteInjector
         self.keystrokeInjector = keystrokeInjector
+        self.clipboardInjector = clipboardInjector
         self.cleanupDeadline = cleanupDeadline
         self.targetProvider = targetProvider
         self.llmStatus = (llmCleaner != nil) ? .notLoaded : .unavailable
@@ -258,6 +261,11 @@ public final class DictationController {
     public var soundFeedback: Bool {
         get { settings.settings.soundFeedback }
         set { settings.update { $0.soundFeedback = newValue } }
+    }
+
+    public var outputRouting: OutputRouting {
+        get { settings.settings.outputRouting }
+        set { settings.update { $0.outputRouting = newValue } }
     }
 
     public func requestPermission(_ kind: PermissionKind) {
@@ -483,10 +491,15 @@ public final class DictationController {
         guard !sanitized.isEmpty else { reset(); return }
 
         phase = machine.phase  // produceText already left the machine in .injecting
-        let plan = InjectionPlan(target: target,
-                                 strategy: target.isTerminal ? .keystroke : .paste,
-                                 stripTrailingNewlines: true)
-        let injector = plan.strategy == .keystroke ? keystrokeInjector : pasteInjector
+        let strategy = InjectionRouter.strategy(routing: settings.settings.outputRouting,
+                                                isTerminal: target.isTerminal)
+        let plan = InjectionPlan(target: target, strategy: strategy, stripTrailingNewlines: true)
+        let injector: TextInjector
+        switch strategy {
+        case .copyOnly:  injector = clipboardInjector
+        case .keystroke: injector = keystrokeInjector
+        case .paste:     injector = pasteInjector
+        }
         try await injector.inject(sanitized, plan: plan)
 
         machine.handle(.injected)

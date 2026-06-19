@@ -54,6 +54,7 @@ public struct Settings: Codable, Sendable, Equatable {
     public var historyEnabled: Bool
     public var llmEnabled: Bool
     public var restoreClipboard: Bool
+    public var outputRouting: OutputRouting
     public var soundFeedback: Bool
     public var hasCompletedOnboarding: Bool
 
@@ -69,6 +70,7 @@ public struct Settings: Codable, Sendable, Equatable {
         historyEnabled: Bool = false,
         llmEnabled: Bool = false,   // opt-in: enabling triggers the ~2.5 GB model download (consent)
         restoreClipboard: Bool = true,
+        outputRouting: OutputRouting = .insert,
         soundFeedback: Bool = true,
         hasCompletedOnboarding: Bool = false
     ) {
@@ -83,6 +85,7 @@ public struct Settings: Codable, Sendable, Equatable {
         self.historyEnabled = historyEnabled
         self.llmEnabled = llmEnabled
         self.restoreClipboard = restoreClipboard
+        self.outputRouting = outputRouting
         self.soundFeedback = soundFeedback
         self.hasCompletedOnboarding = hasCompletedOnboarding
     }
@@ -104,6 +107,7 @@ public struct Settings: Codable, Sendable, Equatable {
         historyEnabled = try c.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? d.historyEnabled
         llmEnabled = try c.decodeIfPresent(Bool.self, forKey: .llmEnabled) ?? d.llmEnabled
         restoreClipboard = try c.decodeIfPresent(Bool.self, forKey: .restoreClipboard) ?? d.restoreClipboard
+        outputRouting = try c.decodeIfPresent(OutputRouting.self, forKey: .outputRouting) ?? d.outputRouting
         soundFeedback = try c.decodeIfPresent(Bool.self, forKey: .soundFeedback) ?? d.soundFeedback
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? d.hasCompletedOnboarding
     }

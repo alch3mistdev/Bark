@@ -11,6 +11,7 @@ final class DictationControllerTests: XCTestCase {
         stt: FakeSTTEngine = FakeSTTEngine(),
         cleaner: FakeCleaner = FakeCleaner(.ok("UNUSED")),
         injector: FakeInjector = FakeInjector(),
+        clipboardInjector: FakeInjector = FakeInjector(),
         mode: String = "clean",
         llmEnabled: Bool = true,
         deadline: Double = 0.3
@@ -25,6 +26,7 @@ final class DictationControllerTests: XCTestCase {
             stt: stt, llmCleaner: cleaner, history: nil,
             audioFactory: { FakeAudioCapture() },
             pasteInjector: injector, keystrokeInjector: injector,
+            clipboardInjector: clipboardInjector,
             cleanupDeadline: deadline, targetProvider: { [target] in target }
         )
     }
@@ -54,6 +56,19 @@ final class DictationControllerTests: XCTestCase {
         c.setAppMode(bundleID: "com.example.TextEdit", modeID: "raw")  // == make()'s targetProvider bundleID
         await dictate(c)
         XCTAssertEqual(injector.last, "hello world")  // raw applied, not "Hello world"
+        XCTAssertEqual(c.phase, .idle)
+    }
+
+    func testCopyOnlyRoutesToClipboardNotPaste() async {
+        // routing=copyOnly → text lands on the clipboard injector; paste injector untouched.
+        let paste = FakeInjector()
+        let clip = FakeInjector()
+        let c = make(stt: FakeSTTEngine(finalText: "hello world"),
+                     injector: paste, clipboardInjector: clip, mode: "raw")
+        c.outputRouting = .copyOnly
+        await dictate(c)
+        XCTAssertEqual(clip.last, "hello world")  // copied
+        XCTAssertEqual(paste.count, 0)             // nothing typed
         XCTAssertEqual(c.phase, .idle)
     }
 

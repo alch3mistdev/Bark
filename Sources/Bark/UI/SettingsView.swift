@@ -197,6 +197,16 @@ private struct GeneralPane: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            Section("Output") {
+                Picker("When dictation ends", selection: $controller.outputRouting) {
+                    ForEach(OutputRouting.allCases) { Text($0.label).tag($0) }
+                }
+                if controller.outputRouting == .copyOnly {
+                    Text("Text is copied to the clipboard instead of typed. Paste it with ⌘V. "
+                         + "Useful for apps where synthetic typing is unreliable.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Section("Startup") {
                 Toggle("Launch Bark at login", isOn: $controller.launchAtLogin)
             }
