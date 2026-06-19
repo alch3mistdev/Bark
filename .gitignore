@@ -6,4 +6,11 @@ DerivedData/
 build/
 dist/
 *.app
+*.dmg
+*.metallib
 Package.resolved
+
+# Agent / Spec Kit tooling (not part of the product)
+.claude/
+.specify/
+CLAUDE.md

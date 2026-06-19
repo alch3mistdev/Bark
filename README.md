@@ -160,3 +160,14 @@ model-manager UI, and the Developer-ID notarization pipeline (`scripts/make-app.
 > installed `.app` and granting TCC permissions interactively — they can't be exercised in a headless
 > build. Two reviews (Codex GPT-5.4 + an adversarial pass) ran on the diff; their findings were fixed
 > or documented in `docs/SECURITY.md`.
+
+## License
+
+Bark's own source is released under the **MIT License** (see `LICENSE`). The optional on-device models
+and dependencies are licensed separately and are **not** covered by this license — notably Apple
+`SpeechAnalyzer` (OS), NVIDIA Parakeet (NVIDIA Open Model License / Apache-2.0), Qwen3-4B (Apache-2.0),
+mlx-swift / swift-transformers (MIT), etc. Review each model/dependency's terms before redistribution.
+
+> Status: experimental / personal project. Built spec-first (`specs/`, `docs/ADRs.md`,
+> `docs/SECURITY.md`, `docs/constitution.md`).
+
