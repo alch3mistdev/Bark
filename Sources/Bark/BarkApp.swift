@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         controller.onOpenSettings = { [weak self] in self?.windowManager.openSettings() }
         controller.onPhaseChange = { [weak self] phase in self?.hud.handlePhase(phase) }
+        controller.onHandsFreeChange = { [weak self] active in self?.hud.setHandsFree(active) }
         controller.activate()
         if !controller.hasCompletedOnboarding {
             showOnboarding()

@@ -27,15 +27,18 @@ public final class DictationController {
     public private(set) var lastResult: String?
     public private(set) var isModelReady = false
     public private(set) var llmStatus: LLMStatus = .unavailable
+    public private(set) var handsFreeActive = false
 
     /// Side-channel callbacks wired by the app layer (AppKit windows/HUD).
     public var onPhaseChange: (@MainActor (DictationPhase) -> Void)?
     public var onOpenSettings: (@MainActor () -> Void)?
+    public var onHandsFreeChange: (@MainActor (Bool) -> Void)?
 
     // Collaborators
     public let settings: SettingsStore
     public let permissions: PermissionsCoordinator
     private let hotkey: HotkeyManager
+    private let handsFreeHotkey: HotkeyManager
     private let audioFactory: @Sendable () -> AudioCapturing
     private let stt: STTEngine
     private let basicCleaner = BasicTextCleaner()
@@ -55,12 +58,15 @@ public final class DictationController {
     private var capturedTarget: InjectionTarget?
     private var prepareToken = 0
     private var llmTask: Task<Void, Never>?
+    private var handsFreeTask: Task<Void, Never>?
+    private var handsFreeAudio: AudioCapturing?
 
     public init(
         settings: SettingsStore,
         permissions: PermissionsCoordinator,
         hotkey: HotkeyManager,
         stt: STTEngine,
+        handsFreeHotkey: HotkeyManager = HotkeyManager(),
         llmCleaner: TextCleaner?,
         history: HistoryStore? = nil,
         audioFactory: @escaping @Sendable () -> AudioCapturing = { AudioCaptureEngine() },
@@ -72,6 +78,7 @@ public final class DictationController {
         self.settings = settings
         self.permissions = permissions
         self.hotkey = hotkey
+        self.handsFreeHotkey = handsFreeHotkey
         self.stt = stt
         self.llmCleaner = llmCleaner
         self.history = history
@@ -99,6 +106,10 @@ public final class DictationController {
     public var hotkeySetting: HotkeySetting {
         get { settings.settings.hotkey }
         set {
+            guard newValue != settings.settings.handsFreeHotkey else {   // no shared binding (ADV-002)
+                lastError = "That key is already the hands-free hotkey."
+                return
+            }
             // Rebinding mid-session would strand a live session on the old key (Codex).
             if machine.isActive { cancelDictation() }
             settings.update { $0.hotkey = newValue }
@@ -251,6 +262,17 @@ public final class DictationController {
             Task { @MainActor in self?.stopDictation() }
         }
         hotkey.start()
+
+        // Hands-free toggle (second hotkey): each press toggles continuous, VAD-gated dictation.
+        handsFreeHotkey.update(HotkeyConfig(settings.settings.handsFreeHotkey))
+        handsFreeHotkey.onStart = { [weak self] in
+            Task { @MainActor in self?.toggleHandsFree() }
+        }
+        handsFreeHotkey.onStop = { [weak self] in
+            Task { @MainActor in self?.toggleHandsFree() }
+        }
+        handsFreeHotkey.start()
+
         Task { await prepareModel() }
         // The LLM model is loaded lazily on first LLM-mode use (see produceText),
         // never at launch — so a model-load failure can't block app startup.
@@ -258,10 +280,13 @@ public final class DictationController {
 
     public func deactivate() {
         hotkey.stop()
+        handsFreeHotkey.stop()
         feedTask?.cancel()
         resultTask?.cancel()
         llmTask?.cancel()
+        handsFreeTask?.cancel()
         audio?.stop()
+        handsFreeAudio?.stop()
     }
 
     private func prepareModel() async {
@@ -287,7 +312,7 @@ public final class DictationController {
     // MARK: - Start / stop
 
     public func startDictation() {
-        guard !machine.isActive else { return }
+        guard !machine.isActive, !handsFreeActive else { return }   // one mic owner at a time
         // Recover from a previous .completed / .failed run so the hotkey always works.
         if machine.phase != .idle { machine.handle(.reset) }
         lastError = nil
@@ -416,9 +441,22 @@ public final class DictationController {
 
     // MARK: - Injection
 
+    /// Push-to-talk injection: failures are fatal to the (single) session.
     private func inject(_ rawText: String, transcript: String, mode: Mode) async {
-        let target = capturedTarget ?? targetProvider()
-        guard let target else { fail("Lost the target window."); return }
+        do {
+            try await performInjection(rawText, transcript: transcript, mode: mode)
+        } catch {
+            fail(Self.injectionMessage(error))
+        }
+    }
+
+    /// Does the actual injection; throws on failure so the CALLER decides whether
+    /// it's fatal. Hands-free catches locally (per-utterance) so one refusal can't
+    /// kill the whole session (ADV-001).
+    private func performInjection(_ rawText: String, transcript: String, mode: Mode) async throws {
+        guard let target = capturedTarget ?? targetProvider() else {
+            throw InjectionError.focusChanged
+        }
 
         // Terminal sinks: keep text only, never anything that could submit.
         let sanitized = TextSanitizer.sanitize(
@@ -427,28 +465,26 @@ public final class DictationController {
         )
         guard !sanitized.isEmpty else { reset(); return }
 
-        // produceText already left the machine in .injecting (directly, or via
-        // .cleaning → .cleanupFinished). Reflect it; don't bypass the machine.
-        phase = machine.phase
-
+        phase = machine.phase  // produceText already left the machine in .injecting
         let plan = InjectionPlan(target: target,
                                  strategy: target.isTerminal ? .keystroke : .paste,
                                  stripTrailingNewlines: true)
-        do {
-            let injector = plan.strategy == .keystroke ? keystrokeInjector : pasteInjector
-            try await injector.inject(sanitized, plan: plan)
-            machine.handle(.injected)
-            phase = machine.phase
-            lastResult = sanitized
-            if soundFeedback { Feedback.inserted() }
-            recordHistory(transcript: transcript, output: sanitized, mode: mode, target: target)
-            reset()
-        } catch InjectionError.secureFieldBlocked {
-            fail("Refused: a password/secure field is focused.")
-        } catch InjectionError.focusChanged {
-            fail("Window focus changed — text not inserted.")
-        } catch {
-            fail("Couldn't insert text: \(Self.describe(error))")
+        let injector = plan.strategy == .keystroke ? keystrokeInjector : pasteInjector
+        try await injector.inject(sanitized, plan: plan)
+
+        machine.handle(.injected)
+        phase = machine.phase
+        lastResult = sanitized
+        if soundFeedback { Feedback.inserted() }
+        recordHistory(transcript: transcript, output: sanitized, mode: mode, target: target)
+        reset()
+    }
+
+    static func injectionMessage(_ error: Error) -> String {
+        switch error {
+        case InjectionError.secureFieldBlocked: return "Refused: a password/secure field is focused."
+        case InjectionError.focusChanged: return "Window focus changed — text not inserted."
+        default: return "Couldn't insert text: \(describe(error))"
         }
     }
 
@@ -502,6 +538,139 @@ public final class DictationController {
         machine.handle(.reset)
         phase = machine.phase
         liveText = ""
+    }
+
+    // MARK: - Hands-free (voice-activated) dictation
+
+    public var handsFreeHotkeySetting: HotkeySetting {
+        get { settings.settings.handsFreeHotkey }
+        set {
+            guard newValue != settings.settings.hotkey else {   // no shared binding (ADV-002)
+                lastError = "That key is already the push-to-talk hotkey."
+                return
+            }
+            settings.update { $0.handsFreeHotkey = newValue }
+            handsFreeHotkey.update(HotkeyConfig(newValue))
+        }
+    }
+
+    public var vadSensitivity: VADSensitivity {
+        get { settings.settings.vadSensitivity }
+        set { settings.update { $0.vadSensitivity = newValue } }
+    }
+
+    public func toggleHandsFree() {
+        handsFreeActive ? stopHandsFree() : startHandsFree()
+    }
+
+    public func startHandsFree() {
+        guard !handsFreeActive, !machine.isActive else { return }  // one mic owner
+        lastError = nil
+        guard permissions.microphone == .granted else {
+            fail("Microphone access is required. Grant it in System Settings.")
+            permissions.openSettings(for: .microphone)
+            return
+        }
+        guard isModelReady else {
+            fail("Speech model is still preparing — try again in a moment.")
+            return
+        }
+        handsFreeActive = true
+        onHandsFreeChange?(true)
+        let engine = audioFactory()
+        handsFreeAudio = engine
+        handsFreeTask = Task { [weak self] in await self?.runHandsFree(engine) }
+    }
+
+    public func stopHandsFree() {
+        guard handsFreeActive else { return }
+        handsFreeActive = false
+        handsFreeTask?.cancel(); handsFreeTask = nil
+        handsFreeAudio?.stop(); handsFreeAudio = nil
+        Task { await stt.cancel() }
+        machine.handle(.reset); phase = machine.phase
+        liveText = ""
+        onHandsFreeChange?(false)
+    }
+
+    /// Continuous, VAD-gated loop: detect speech onset → capture the utterance →
+    /// on silence, finalize → clean → inject → keep listening. Until toggled off.
+    private func runHandsFree(_ engine: AudioCapturing) async {
+        let stream: AsyncStream<AudioFrames>
+        do { stream = try engine.start() }
+        catch { fail(Self.describe(error)); stopHandsFree(); return }
+
+        var vad = VoiceActivityDetector(config: VADConfig(sensitivity: settings.settings.vadSensitivity))
+        var capturing = false
+        var preroll: [AudioFrames] = []
+        let prerollMax = 3   // ~300 ms, so we don't clip speech onset
+        var resultConsumer: Task<Void, Never>?
+        var capturedFrames = 0
+        let maxUtteranceFrames = 300   // ~30 s safety cap (never-ending speech/noise)
+
+        for await frames in stream {
+            guard handsFreeActive, !Task.isCancelled else { break }
+            let event = vad.process(frames)
+
+            if !capturing {
+                preroll.append(frames)
+                if preroll.count > prerollMax { preroll.removeFirst() }
+                guard event == .speechStarted else { continue }
+
+                capturedTarget = targetProvider()
+                finalSegments = []; volatileTail = ""; liveText = ""
+                machine.handle(.reset); machine.handle(.startPressed); machine.handle(.audioStarted)
+                phase = machine.phase
+                if soundFeedback { Feedback.started() }
+                do {
+                    let results = try await stt.beginStream()
+                    resultConsumer = Task { @MainActor [weak self] in
+                        do { for try await r in results { self?.apply(r) } } catch {}
+                    }
+                    for f in preroll { await stt.feed(f) }
+                    preroll.removeAll()
+                    capturing = true
+                    capturedFrames = 0
+                } catch {
+                    // STT failed to start: don't keep the mic open silently (Codex).
+                    lastError = "Couldn't start the speech engine — hands-free turned off."
+                    stopHandsFree()
+                    return
+                }
+            } else {
+                await stt.feed(frames)
+                capturedFrames += 1
+                // Finalize on silence, or force-finalize at the safety cap.
+                guard event == .speechEnded || capturedFrames >= maxUtteranceFrames else { continue }
+
+                machine.handle(.stopPressed); phase = machine.phase
+                try? await stt.finishStream()
+                await resultConsumer?.value
+                resultConsumer = nil
+                capturing = false
+
+                let transcript = (finalSegments.joined(separator: " ") + " " + volatileTail)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if transcript.isEmpty {
+                    machine.handle(.reset); phase = machine.phase
+                } else {
+                    let mode = currentMode
+                    machine.handle(.transcriptFinalized); phase = machine.phase
+                    let cleaned = await produceText(transcript, mode: mode)
+                    // Toggled off (or cancelled) during cleanup → do NOT inject (Codex).
+                    guard handsFreeActive, !Task.isCancelled else { break }
+                    // Per-utterance: an injection refusal must NOT kill the session (ADV-001).
+                    do {
+                        try await performInjection(cleaned, transcript: transcript, mode: mode)
+                    } catch {
+                        lastError = Self.injectionMessage(error)
+                        machine.handle(.reset); phase = machine.phase
+                    }
+                }
+                vad.reset()
+                finalSegments = []; volatileTail = ""; liveText = ""
+            }
+        }
     }
 
     static func describe(_ error: Error) -> String {

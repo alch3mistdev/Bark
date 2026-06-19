@@ -51,6 +51,16 @@ struct MenuContentView: View {
 
             controlButton
 
+            Button {
+                controller.toggleHandsFree()
+            } label: {
+                Label(controller.handsFreeActive ? "Hands-free: On" : "Hands-free",
+                      systemImage: controller.handsFreeActive ? "waveform.circle.fill" : "waveform.circle")
+                    .frame(maxWidth: .infinity)
+            }
+            .tint(controller.handsFreeActive ? Color.accentColor : nil)
+            .disabled(!controller.isModelReady || !controller.permissionsReady)
+
             Divider()
             footer
         }
@@ -95,7 +105,7 @@ struct MenuContentView: View {
             } label: {
                 Label("Start dictation", systemImage: "mic.fill").frame(maxWidth: .infinity)
             }
-            .disabled(!controller.isModelReady || !controller.permissionsReady)
+            .disabled(!controller.isModelReady || !controller.permissionsReady || controller.handsFreeActive)
         }
     }
 

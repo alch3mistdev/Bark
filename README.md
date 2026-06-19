@@ -132,6 +132,9 @@ Bark (SwiftUI MenuBarExtra)
 - **Launch at login** (`SMAppService`) — toggle in Settings → General.
 - **Configurable hotkey** — Settings → Hotkey: **Hold fn** (push-to-talk) or record a **function key**
   (F1–F20) to toggle. (Plain ⌘/⌥/⌃ holds aren't offered — they'd fire on every normal shortcut.)
+- **Hands-free mode** — a separate toggle hotkey (default **F5**) turns on continuous, voice-activated
+  dictation: it records when you speak and inserts when you pause, then keeps listening — no button.
+  Adjustable sensitivity (Settings → Hotkey → Hands-free).
 - **Menu shows the last result** with one-click Copy; subtle start/insert sounds (toggleable).
 - **Custom modes** — add your own rewrite modes (name + system prompt) alongside the built-ins.
 - **Encrypted, opt-in history** — off by default; when on, transcripts are AES-256-GCM encrypted
