@@ -124,3 +124,46 @@ documented rather than hidden:
   already bound. The recorder shows a warning, doesn't refuse (mirrors push-to-talk recorder UX).
   Users can rebind. A future iteration could surface the running shortcut via
   `NSEvent.addGlobalMonitorForEvents` and warn more precisely.
+
+## File read for code intelligence  (`Sources/BarkCore/Code/*`, ADR-008, `specs/010-inline-code-dictation/`)
+- ☑ First-time **per-app-per-language consent dialog** is shown before reading the focused file
+  for the first time in a given app+language combination. The dialog names the app by name +
+  bundle ID and the language by extension + display name. Three options: "Always allow"
+  (persists for that app+language), "Allow once" (transient, not persisted), "Never"
+  (blocklist; the symbol index is silently skipped for that app+language). The consent list
+  is in `Settings.codeIntelligence.fileReadConsents`, key = `"\(bundleID)/\(language)"`.
+- ☑ **1 MB cap.** Files larger than 1 MB skip the symbol index and degrade to prefix-only
+  formatting. The cap is enforced in the file-read coordinator; the user is informed via a
+  one-time log message ("Skipping symbol index for <path>: <reason>").
+- ☑ **Binary / unreadable files are skipped** with the same log message. The user is not
+  prompted for consent; the index is silently skipped.
+- ☑ **No new network events.** The file read is local. The symbol index is local. The LLM
+  rewrite uses the existing on-device `MLXTextCleaner` path.
+- ☑ **Symbol index is bounded** (default 500 entries, deterministic truncation in source order).
+  The LLM is told the index is partial if the file has more identifiers.
+- ☑ **Lean build does not read the file.** Without `CODE_INTELLIGENCE` defined, the symbol
+  index is unavailable; comment formatting uses prefix only. This is a privacy-friendly default.
+- ☑ **The user can revoke consent at any time** via Settings ▸ Code ▸ File-read consent (lists
+  all app+language entries with Allow / Never / Reset controls).
+- **Residual (L-10 — SwiftSyntax reads file content):** the SwiftSyntax-backed identifier
+  extractor for Swift files sees the file's content. The user has explicitly opted in via the
+  consent dialog. The same risk surface exists for the existing `AssetInventory` for STT
+  models (also gated by consent). The user can revoke via Settings.
+- **Residual (L-11 — "Always allow" persists forever):** once a user clicks "Always allow"
+  for an app+language, we never re-prompt for that combination. The user can revoke via
+  Settings ▸ Code ▸ File-read consent. A future hardening could add a 90-day expiry on
+  "Always allow" entries.
+- **Residual (L-12 — Regex extractor false positives):** for non-Swift languages, the regex
+  extractor can grab identifiers from comments or string literals. The extractor strips
+  comments and string literals first, but the stripping is heuristic. Worst case: an extra
+  identifier in the symbol index that the LLM doesn't reference. Not a security issue, but a
+  quality issue.
+- **Residual (L-13 — Identifier hallucination):** the LLM may invent identifiers not in the
+  symbol index. The new `OutputValidator` rule flags non-existent identifiers in the rewrite
+  (best-effort: a reference to an imported type from another module is valid but won't be in
+  the index). The validator doesn't reject; it surfaces a warning in the history record.
+- **Residual (L-14 — Commit-box heuristic false positives):** the `CommitBoxDetector`
+  heuristic may mis-identify a non-commit text field as a commit-message box. The confidence
+  threshold (≥ 0.7) gates auto-formatting; below the threshold the user sees a one-time
+  per-app toast with a confirmation. Worst case: a comment or note gets formatted as a
+  Conventional Commits message; the user can revert via Settings ▸ Code.

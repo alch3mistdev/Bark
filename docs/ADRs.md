@@ -72,3 +72,30 @@ automation brittleness in Electron apps; spoken instruction as a prompt-injectio
 by the length-drift rule + prompt fence). See `docs/ADR-007-revision-surface.md` for the full
 record (alternatives, verification) and `specs/009-voice-driven-revision/` for the spec, plan, and
 tasks.
+
+## ADR-008 — Inline code comment + commit-message dictation (developer-specific)
+**Decision.** Add file-aware code dictation: a static `LanguageCommentTable` in `BarkCore`
+maps file extension → comment style (`//`, `#`, `<!-- -->` etc.); an LLM-backed rewrite pass
+for code comments is given a per-file symbol index (extracted via `LanguageIdentifier`
+protocol — `RegexLanguageIdentifier` in `BarkCore`, `SwiftSyntaxLanguageIdentifier` in
+`BarkCleanupMLX` gated by `#if CODE_INTELLIGENCE`); Conventional Commits formatting is
+applied to commit-message boxes (detected by `CommitBoxDetector` heuristic + a one-time
+per-app toast for uncertain cases). Reading the focused file to build the symbol index
+is a privacy expansion — gated by a per-app-per-language consent dialog (default "Allow
+once"; user-configurable in Settings ▸ Code). The lean build degrades gracefully: comment
+prefix works without an LLM; identifier preservation and Conventional Commits formatting
+are skipped.
+**Why.** Every dictation app targets prose. Developers are a non-trivial share of macOS
+dictation users, and they currently get a *worse* experience than email writers. This is
+the #2-ranked gap from the 2026-06-19 competitive analysis and the dev-specific wedge for
+Bark: combined with the voice-driven revision surface (ADR-007) and the offline posture
+(constitution I), it gives Bark a unique position in the dictation category for developers.
+**Consequence.** Lean build gains the comment prefix and language table (no new deps, no
+new network). MLX build adds identifier preservation and Conventional Commits formatting.
+`Settings` grows by `codeIntelligence: CodeIntelligenceSettings` (master toggle + per-
+language toggles + per-app-per-language file-read consents). STRIDE in `docs/SECURITY.md`
+gains a "File read for code intelligence" section. ~25 new tests. Honest residual risks:
+SwiftSyntax reads the file's content; the consent dialog can be bypassed by "Always allow";
+the regex extractor on non-Swift files can include false positives. See
+`docs/ADR-008-code-intelligence.md` for the full record (alternatives, verification) and
+`specs/010-inline-code-dictation/` for the spec, plan, and tasks.
