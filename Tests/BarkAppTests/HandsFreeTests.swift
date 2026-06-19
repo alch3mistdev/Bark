@@ -79,6 +79,21 @@ final class HandsFreeTests: XCTestCase {
         XCTAssertEqual(injector.count, 0)
     }
 
+    func testAbnormalStreamEndResetsState() async {
+        // The audio stream dies on its own (device loss): the hands-free loop must
+        // clear the meter and flip handsFreeActive off so the HUD doesn't freeze and
+        // the next hotkey isn't swallowed (ADV-001).
+        let injector = FakeInjector()
+        let script = [Float](repeating: 0.3, count: 5)   // a little speech, then the stream finishes
+        let c = make(audio: { ScriptedAudioCapture(rmsLevels: script, autoFinish: true) }, injector: injector)
+        await c.warmModel()
+        c.startHandsFree()
+        XCTAssertTrue(c.handsFreeActive)
+        let cleared = await wait { !c.handsFreeActive }
+        XCTAssertTrue(cleared)            // session torn down after the stream ended
+        XCTAssertEqual(c.inputLevel, 0)   // meter not left frozen
+    }
+
     func testPushToTalkIgnoredWhileHandsFree() async {
         let injector = FakeInjector()
         let c = make(audio: { ScriptedAudioCapture(rmsLevels: [Float](repeating: 0, count: 100)) }, injector: injector)

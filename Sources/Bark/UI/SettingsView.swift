@@ -212,6 +212,10 @@ private struct GeneralPane: View {
             }
             Section("Feedback") {
                 Toggle("Play start / insert sounds", isOn: $controller.soundFeedback)
+                Toggle("Enhanced recording overlay", isOn: $controller.enhancedHUD)
+                Text("Larger live text with a mic-level meter, anchored near the text cursor when the "
+                     + "app supports it. Off uses the compact strip at the bottom of the screen.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

@@ -29,6 +29,7 @@ public final class DictationController {
     public private(set) var llmStatus: LLMStatus = .unavailable
     public private(set) var handsFreeActive = false
     public private(set) var isReinserting = false   // serializes one-click re-insert (Codex)
+    public private(set) var inputLevel: Float = 0    // 0...1 smoothed mic level for the HUD meter
 
     /// Side-channel callbacks wired by the app layer (AppKit windows/HUD).
     public var onPhaseChange: (@MainActor (DictationPhase) -> Void)?
@@ -329,6 +330,14 @@ public final class DictationController {
         set { settings.update { $0.outputRouting = newValue } }
     }
 
+    public var enhancedHUD: Bool {
+        get { settings.settings.enhancedHUD }
+        set { settings.update { $0.enhancedHUD = newValue } }
+    }
+
+    /// Push the latest smoothed mic level to the HUD (called from the feed loops).
+    func setInputLevel(_ level: Float) { inputLevel = level }
+
     public func requestPermission(_ kind: PermissionKind) {
         switch kind {
         case .microphone:      Task { await permissions.requestMicrophone() }
@@ -373,6 +382,7 @@ public final class DictationController {
         handsFreeTask?.cancel()
         audio?.stop()
         handsFreeAudio?.stop()
+        inputLevel = 0   // don't leave a frozen meter behind (ADV-001)
     }
 
     private func prepareModel() async {
@@ -435,10 +445,14 @@ public final class DictationController {
             let audioStream = try engine.start()
             machine.handle(.audioStarted)
 
-            feedTask = Task { [stt] in
+            feedTask = Task { [stt, weak self] in
+                var meter = LevelMeter()
                 for await frames in audioStream {
                     await stt.feed(frames)
+                    let level = meter.update(rms: VoiceActivityDetector.rms(frames.samples))
+                    self?.setInputLevel(level)
                 }
+                self?.setInputLevel(0)
             }
             resultTask = Task { @MainActor [weak self] in
                 do {
@@ -611,6 +625,7 @@ public final class DictationController {
         feedTask?.cancel(); resultTask?.cancel()
         audio?.stop(); audio = nil
         capturedTarget = nil   // don't let a dead session's target bleed into per-app mode (ADV-003)
+        inputLevel = 0
         Task { await stt.cancel() }
     }
 
@@ -621,6 +636,7 @@ public final class DictationController {
         machine.handle(.reset)
         phase = machine.phase
         liveText = ""
+        inputLevel = 0
     }
 
     /// Stop a live session immediately (e.g. user rebinds the hotkey mid-dictation).
@@ -630,6 +646,7 @@ public final class DictationController {
         feedTask = nil; resultTask = nil
         audio?.stop(); audio = nil
         capturedTarget = nil   // (ADV-003)
+        inputLevel = 0
         Task { await stt.cancel() }
         machine.handle(.reset)
         phase = machine.phase
@@ -686,6 +703,7 @@ public final class DictationController {
         Task { await stt.cancel() }
         machine.handle(.reset); phase = machine.phase
         liveText = ""
+        inputLevel = 0
         onHandsFreeChange?(false)
     }
 
@@ -703,10 +721,12 @@ public final class DictationController {
         var resultConsumer: Task<Void, Never>?
         var capturedFrames = 0
         let maxUtteranceFrames = 300   // ~30 s safety cap (never-ending speech/noise)
+        var meter = LevelMeter()
 
         for await frames in stream {
             guard handsFreeActive, !Task.isCancelled else { break }
             let event = vad.process(frames)
+            inputLevel = meter.update(rms: VoiceActivityDetector.rms(frames.samples))
 
             if !capturing {
                 preroll.append(frames)
@@ -766,6 +786,18 @@ public final class DictationController {
                 vad.reset()
                 finalSegments = []; volatileTail = ""; liveText = ""
             }
+        }
+        // Stream ended (device loss / abnormal finish). Clear the meter and, if we
+        // still believe we're live, tear the session down so the HUD doesn't freeze
+        // and the next hotkey isn't silently swallowed (ADV-001). If stopHandsFree
+        // drove us here it already flipped handsFreeActive off, so this is a no-op.
+        inputLevel = 0
+        if handsFreeActive {
+            handsFreeActive = false
+            handsFreeAudio?.stop(); handsFreeAudio = nil
+            machine.handle(.reset); phase = machine.phase
+            liveText = ""
+            onHandsFreeChange?(false)
         }
     }
 

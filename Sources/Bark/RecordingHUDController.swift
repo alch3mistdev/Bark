@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import BarkCore
+import BarkEngines
 
 /// Shows/hides a floating, **non-activating** HUD panel as dictation runs. The
 /// panel never becomes key, so the focused app (and Bark's focus/secure-field
@@ -11,6 +12,7 @@ final class RecordingHUDController {
     private var panel: NSPanel?
     private var hideWorkItem: DispatchWorkItem?
     private var handsFree = false
+    private var positionToken = 0   // invalidates stale async caret-anchor results
 
     init(controller: DictationController) {
         self.controller = controller
@@ -40,8 +42,42 @@ final class RecordingHUDController {
     private func show() {
         let panel = panel ?? makePanel()
         self.panel = panel
-        position(panel)
+        let size = RecordingHUDView.size(enhanced: controller.enhancedHUD)
+        if panel.frame.size != size { panel.setContentSize(size) }
+
+        // Position at the safe fallback immediately — show() must never block on an
+        // Accessibility probe (it runs synchronously from the phase setter; a hung
+        // focused app would otherwise stall dictation start/stop) (Codex/ADV-003).
+        panel.setFrameOrigin(HUDPlacement.bottomCenter(panelSize: size, visibleFrame: fallbackVisibleFrame()))
         panel.orderFront(nil)   // never makeKey — keep focus on the target app
+
+        // Enhanced overlay: refine to a caret anchor OFF the main actor, then
+        // reposition. Skip entirely for secure fields (don't anchor over a password
+        // field) (ADV-004).
+        positionToken += 1
+        guard controller.enhancedHUD, !SecureFieldDetector.secureInputActive() else { return }
+        let token = positionToken
+        Task.detached {
+            guard let caret = FocusProbe.focusedCaretRect() else { return }
+            await MainActor.run { [weak self] in self?.applyCaretAnchor(caret, token: token, size: size) }
+        }
+    }
+
+    /// Reposition under the caret if the probe is still current and lands on a real
+    /// screen; otherwise keep the bottom-center fallback already applied in show().
+    private func applyCaretAnchor(_ caret: CGRect, token: Int, size: CGSize) {
+        guard token == positionToken, let panel, panel.isVisible else { return }   // stale or hidden
+        guard let primary = NSScreen.screens.first(where: { $0.frame.origin == .zero }) ?? NSScreen.screens.first,
+              let screen = screenContaining(caretAX: caret, primaryHeight: primary.frame.height),  // nil → keep fallback (ADV-002)
+              let origin = HUDPlacement.underCaret(caretAX: caret, panelSize: size,
+                                                   visibleFrame: screen.visibleFrame,
+                                                   primaryHeight: primary.frame.height)
+        else { return }
+        panel.setFrameOrigin(origin)
+    }
+
+    private func fallbackVisibleFrame() -> CGRect {
+        (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
     }
 
     private func scheduleHide(after seconds: Double) {
@@ -72,10 +108,10 @@ final class RecordingHUDController {
         return panel
     }
 
-    private func position(_ panel: NSPanel) {
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
-        let visible = screen.visibleFrame
-        let size = panel.frame.size
-        panel.setFrameOrigin(NSPoint(x: visible.midX - size.width / 2, y: visible.minY + 120))
+    /// Screen whose frame contains the caret (caret converted AX→AppKit).
+    private func screenContaining(caretAX: CGRect, primaryHeight: CGFloat) -> NSScreen? {
+        let appKitY = primaryHeight - caretAX.maxY
+        let point = CGPoint(x: caretAX.midX, y: appKitY)
+        return NSScreen.screens.first { $0.frame.contains(point) }
     }
 }
