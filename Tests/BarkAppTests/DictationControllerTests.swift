@@ -14,7 +14,8 @@ final class DictationControllerTests: XCTestCase {
         clipboardInjector: TextInjector = FakeInjector(),
         mode: String = "clean",
         llmEnabled: Bool = true,
-        deadline: Double = 0.3
+        deadline: Double = 0.3,
+        audioFactory: @escaping @Sendable () -> AudioCapturing = { FakeAudioCapture() }
     ) -> DictationController {
         let defaults = UserDefaults(suiteName: "bark-test-\(UUID().uuidString)")!
         let settings = SettingsStore(defaults: defaults, key: "k")
@@ -24,7 +25,7 @@ final class DictationControllerTests: XCTestCase {
         return DictationController(
             settings: settings, permissions: perms, hotkey: HotkeyManager(),
             stt: stt, llmCleaner: cleaner, history: nil,
-            audioFactory: { FakeAudioCapture() },
+            audioFactory: audioFactory,
             pasteInjector: injector, keystrokeInjector: injector,
             clipboardInjector: clipboardInjector,
             cleanupDeadline: deadline, targetProvider: { [target] in target }
@@ -140,6 +141,19 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(paste.count, 0)  // refused while a session is live
         c.stopDictation()
         await waitForTerminal(c)
+    }
+
+    // 008 — mic level meter
+
+    func testInputLevelTracksAudioThenResets() async {
+        let c = make(audioFactory: { ScriptedAudioCapture(rmsLevels: Array(repeating: 0.5, count: 60)) })
+        await c.warmModel()
+        c.startDictation()
+        try? await Task.sleep(for: .milliseconds(120))
+        XCTAssertGreaterThan(c.inputLevel, 0.2)  // meter rose with the audio frames
+        c.stopDictation()
+        await waitForTerminal(c)
+        XCTAssertEqual(c.inputLevel, 0)          // cleared once the session ends
     }
 
     func testRawHappyPathInjectsCleanedText() async {

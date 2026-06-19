@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import BarkCore
+import BarkEngines
 
 /// Shows/hides a floating, **non-activating** HUD panel as dictation runs. The
 /// panel never becomes key, so the focused app (and Bark's focus/secure-field
@@ -40,6 +41,8 @@ final class RecordingHUDController {
     private func show() {
         let panel = panel ?? makePanel()
         self.panel = panel
+        let size = RecordingHUDView.size(enhanced: controller.enhancedHUD)
+        if panel.frame.size != size { panel.setContentSize(size) }
         position(panel)
         panel.orderFront(nil)   // never makeKey — keep focus on the target app
     }
@@ -73,9 +76,31 @@ final class RecordingHUDController {
     }
 
     private func position(_ panel: NSPanel) {
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
-        let visible = screen.visibleFrame
         let size = panel.frame.size
-        panel.setFrameOrigin(NSPoint(x: visible.midX - size.width / 2, y: visible.minY + 120))
+
+        // Enhanced HUD anchors near the text caret when the focused field exposes
+        // one; everything else (and any failure) falls back to bottom-center.
+        if controller.enhancedHUD,
+           let caret = FocusProbe.focusedCaretRect(),
+           let primary = NSScreen.screens.first(where: { $0.frame.origin == .zero }) ?? NSScreen.screens.first {
+            let screen = screenContaining(caretAX: caret, primaryHeight: primary.frame.height) ?? NSScreen.main ?? primary
+            if let origin = HUDPlacement.underCaret(caretAX: caret, panelSize: size,
+                                                    visibleFrame: screen.visibleFrame,
+                                                    primaryHeight: primary.frame.height) {
+                panel.setFrameOrigin(origin)
+                return
+            }
+        }
+
+        let screen = NSScreen.main ?? NSScreen.screens.first
+        let visible = screen?.visibleFrame ?? .init(x: 0, y: 0, width: 1440, height: 900)
+        panel.setFrameOrigin(HUDPlacement.bottomCenter(panelSize: size, visibleFrame: visible))
+    }
+
+    /// Screen whose frame contains the caret (caret converted AX→AppKit).
+    private func screenContaining(caretAX: CGRect, primaryHeight: CGFloat) -> NSScreen? {
+        let appKitY = primaryHeight - caretAX.maxY
+        let point = CGPoint(x: caretAX.midX, y: appKitY)
+        return NSScreen.screens.first { $0.frame.contains(point) }
     }
 }
