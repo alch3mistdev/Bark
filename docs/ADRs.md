@@ -47,3 +47,21 @@ locale asset on first use; any future downloaded model is sha256-verified.
 independently. CGEventTap + Accessibility forbid the MAS sandbox.
 **Consequence.** A notarization step (`scripts/make-app.sh` + `notarytool`); first-run asset install is
 the only network event; offline thereafter.
+
+## ADR-006 — Pluggable STT backends behind `STTEngineFactory`
+**Decision.** Add WhisperKit and Parakeet TDT (via FluidAudio) as optional `STTEngine`
+implementations, selected by `STTEngineFactory` from a persisted `Settings.sttBackend`. The
+opt-in manifest `Package-stt-extras.swift` adds the SwiftPM dependencies and the `WHISPERKIT` /
+`FLUIDAUDIO` flags; the lean build compiles stub implementations that throw a clear "not
+compiled in this build" error so the pipeline stays runnable offline. Model downloads are
+sha256-verified against a bundled `ModelManifest` (`ModelDownloader.ensureModel`); mismatch
+deletes the file and never writes it to the cache (`SEC-003 / T-010`).
+**Why.** ADR-002 named these adapters as a future extension; this closes that gap with the
+smallest possible surface (one factory + one manifest schema + one downloader). It also closes
+the SECURITY.md ☐ for downloaded-model integrity and gives WhisperKit users a clear path to
+opt in without compromising the lean build's offline guarantees.
+**Consequence.** Lean build is unchanged. Extras build adds two backends and a model
+download path. Settings UI hides uncompiled backends. Stale settings from a future build can
+never brick the app — the factory falls back to `SpeechAnalyzerEngine()` and logs a warning.
+See `docs/ADR-006-stt-engine-selection.md` for the full record (alternatives, verification).
+

@@ -7,7 +7,7 @@ import BarkCleanupMLX
 #endif
 
 /// Single place where concrete engines are chosen and wired. Swap an STT engine
-/// or cleaner here without touching the pipeline (ADR-002 / ADR-003).
+/// or cleaner here without touching the pipeline (ADR-002 / ADR-003 / ADR-006).
 @MainActor
 enum CompositionRoot {
     static func makeController() -> DictationController {
@@ -15,7 +15,16 @@ enum CompositionRoot {
         let permissions = PermissionsCoordinator()
         let hotkey = HotkeyManager()                 // push-to-talk; restored from settings in activate()
         let handsFreeHotkey = HotkeyManager()        // hands-free toggle
-        let stt: STTEngine = SpeechAnalyzerEngine()  // Apple on-device, macOS 26
+
+        // The chosen STT backend is read from settings; the factory returns the
+        // Apple engine if the persisted backend isn't compiled in (defensive —
+        // a setting from a future build can never brick the app).
+        let stt: STTEngine = STTEngineFactory.make(
+            id: settings.settings.sttBackend,
+            manifest: STTEngineFactory.bundledManifest(for: settings.settings.sttBackend),
+            downloader: ModelDownloader()
+        )
+
         let history: HistoryStore = EncryptedHistoryStore()
 
         let llm: TextCleaner?

@@ -4,11 +4,18 @@ Threat model from the design phase (ef-security, STRIDE). Below: the controls an
 code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the next sections).
 
 ## Offline guarantee
-- ☑ No networking code anywhere in the app at runtime. The only network event is the OS installing the
-  SpeechAnalyzer locale asset on first use (`AssetInventory`, `SpeechAnalyzerEngine.prepare`).
+- ☑ No networking code anywhere in the app at runtime. The only network events are the OS installing the
+  SpeechAnalyzer locale asset on first use (`AssetInventory`, `SpeechAnalyzerEngine.prepare`) and
+  user-initiated model downloads for the optional WhisperKit / Parakeet backends
+  (`ModelDownloader.ensureModel`).
 - ☑ No analytics / telemetry / crash-reporting SDKs. `BarkLog` never logs transcript or audio content.
-- ☐ A future downloaded-model path (Parakeet/MLX weights) must sha256-verify against a signed manifest
-  over TLS before load (SEC-003 / T-010).
+- ☑ Downloaded model bundles (WhisperKit / Parakeet) are SHA-256 verified against a bundled
+  `ModelManifest` before they're allowed into the cache. Hash mismatch → file is deleted, never written
+  to the cache path, and an error is surfaced to the UI (`ModelDownloader.ensureModel`,
+  `ModelManifest`). Manifests themselves live in the app bundle and are not fetched at runtime
+  (`SEC-003 / T-010`). HTTPS-only enforced at the downloader; non-HTTPS manifests are rejected with
+  `ModelError.insecureURL`. Manifest signing (detached ed25519 verified against a baked-in pubkey) is
+  the next hardening step — tracked but not yet implemented.
 
 ## Microphone privacy
 - ☑ Mic opened only during active dictation; `AVAudioEngine` fully torn down on `stop()`
