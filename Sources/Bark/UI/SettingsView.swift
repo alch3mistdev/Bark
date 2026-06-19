@@ -360,6 +360,8 @@ private struct ModeEditor: View {
 private struct HistoryPane: View {
     @Bindable var controller: DictationController
     @State private var records: [HistoryRecord] = []
+    @State private var query = ""
+    @State private var copiedID: UUID?
 
     var body: some View {
         Form {
@@ -368,29 +370,45 @@ private struct HistoryPane: View {
                 Text("Off by default. When on, transcripts are stored encrypted (AES-GCM, key in Keychain).")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("Recent") {
+            Section("History") {
+                TextField("Search", text: $query)
+                    .textFieldStyle(.roundedBorder)
                 if records.isEmpty {
-                    Text("No history.").foregroundStyle(.secondary)
+                    Text(query.isEmpty ? "No history." : "No matches.").foregroundStyle(.secondary)
                 }
                 ForEach(records) { r in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(r.output).lineLimit(2)
-                        Text(r.createdAt.formatted(date: .abbreviated, time: .shortened))
-                            .font(.caption2).foregroundStyle(.secondary)
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(r.output).lineLimit(2)
+                            Text(r.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(copiedID == r.id ? "Copied" : "Copy") {
+                            Task { await controller.copyToClipboard(r.output); copiedID = r.id }
+                        }
+                        .buttonStyle(.borderless)
                     }
                     .contextMenu {
-                        Button("Copy") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(r.output, forType: .string) }
+                        Button("Copy to clipboard") {
+                            Task { await controller.copyToClipboard(r.output); copiedID = r.id }
+                        }
                     }
                 }
                 if !records.isEmpty {
                     Button("Purge all history", role: .destructive) {
-                        Task { await controller.purgeHistory(); records = await controller.historyRecords() }
+                        Task { await controller.purgeHistory(); await reload() }
                     }
                 }
             }
         }
         .formStyle(.grouped)
-        .task { records = await controller.historyRecords() }
+        .task { await reload() }
+        .onChange(of: query) { _, _ in copiedID = nil; Task { await reload() } }
+    }
+
+    private func reload() async {
+        records = await controller.searchHistory(query)
     }
 }
 

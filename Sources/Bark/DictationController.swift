@@ -240,6 +240,51 @@ public final class DictationController {
         await history?.all() ?? []
     }
 
+    /// Search saved history (case/diacritic-insensitive); empty query → recent. (007)
+    public func searchHistory(_ query: String) async -> [HistoryRecord] {
+        await history?.search(query) ?? []
+    }
+
+    /// Re-use a past dictation by copying it to the clipboard. The safe path from
+    /// the Settings window (frontmost), where typing would land in the wrong app.
+    /// Marks the payload concealed; never restores the clipboard. (007)
+    public func copyToClipboard(_ text: String) async {
+        let plan = InjectionPlan(target: InjectionTarget(pid: 0, bundleID: nil), strategy: .copyOnly)
+        do {
+            try await clipboardInjector.inject(text, plan: plan)
+            lastResult = text
+            if soundFeedback { Feedback.inserted() }
+        } catch {
+            lastError = Self.injectionMessage(error)
+        }
+    }
+
+    /// Type a past dictation into the currently focused app. Only safe from the
+    /// menubar popover, where the user's target app is still frontmost. Honours
+    /// the focus/secure-field guards and the global output routing. No-op while a
+    /// dictation is active. (007)
+    public func reinsert(_ record: HistoryRecord) async {
+        guard !phase.isActive else { return }
+        guard let target = targetProvider() else {
+            lastError = Self.injectionMessage(InjectionError.focusChanged); return
+        }
+        let sanitized = TextSanitizer.sanitize(
+            record.output,
+            options: .init(allowNewlines: !target.isTerminal, stripTrailingNewlines: true)
+        )
+        guard !sanitized.isEmpty else { return }
+        let strategy = InjectionRouter.strategy(routing: settings.settings.outputRouting,
+                                                isTerminal: target.isTerminal)
+        let plan = InjectionPlan(target: target, strategy: strategy, stripTrailingNewlines: true)
+        do {
+            try await injector(for: strategy).inject(sanitized, plan: plan)
+            lastResult = sanitized
+            if soundFeedback { Feedback.inserted() }
+        } catch {
+            lastError = Self.injectionMessage(error)
+        }
+    }
+
     public func purgeHistory() async {
         try? await history?.purge()
     }
@@ -494,13 +539,7 @@ public final class DictationController {
         let strategy = InjectionRouter.strategy(routing: settings.settings.outputRouting,
                                                 isTerminal: target.isTerminal)
         let plan = InjectionPlan(target: target, strategy: strategy, stripTrailingNewlines: true)
-        let injector: TextInjector
-        switch strategy {
-        case .copyOnly:  injector = clipboardInjector
-        case .keystroke: injector = keystrokeInjector
-        case .paste:     injector = pasteInjector
-        }
-        try await injector.inject(sanitized, plan: plan)
+        try await injector(for: strategy).inject(sanitized, plan: plan)
 
         machine.handle(.injected)
         phase = machine.phase
@@ -508,6 +547,14 @@ public final class DictationController {
         if soundFeedback { Feedback.inserted() }
         recordHistory(transcript: transcript, output: sanitized, mode: mode, target: target)
         reset()
+    }
+
+    private func injector(for strategy: InjectionStrategy) -> TextInjector {
+        switch strategy {
+        case .copyOnly:  return clipboardInjector
+        case .keystroke: return keystrokeInjector
+        case .paste:     return pasteInjector
+        }
     }
 
     static func injectionMessage(_ error: Error) -> String {

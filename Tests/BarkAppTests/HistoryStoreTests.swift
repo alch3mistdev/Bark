@@ -29,6 +29,28 @@ final class HistoryStoreTests: XCTestCase {
         XCTAssertTrue(after.isEmpty)
     }
 
+    func testDefaultSearchAndRecent() async throws {
+        // The protocol's default search/recent (007) compose HistoryQuery + RetentionPolicy
+        // over all(); the concrete store needs no change.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("barktest-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = EncryptedHistoryStore(directory: dir, key: SymmetricKey(size: .bits256))
+        try await store.append(HistoryRecord(transcript: "send email", output: "Send email.", modeID: "email", appBundleID: nil))
+        try await store.append(HistoryRecord(transcript: "git status", output: "git status", modeID: "raw", appBundleID: nil))
+
+        let hits = await store.search("git")
+        XCTAssertEqual(hits.map(\.output), ["git status"])
+
+        let empty = await store.search("nomatch")
+        XCTAssertTrue(empty.isEmpty)
+
+        // Blank query → recent (all, newest-first, trimmed).
+        let blank = await store.search("")
+        XCTAssertEqual(blank.count, 2)
+        let recent = await store.recent(limit: 1)
+        XCTAssertEqual(recent.count, 1)
+    }
+
     func testWrongKeyCannotDecrypt() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("barktest-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }

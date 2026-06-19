@@ -61,6 +61,10 @@ struct MenuContentView: View {
             .tint(controller.handsFreeActive ? Color.accentColor : nil)
             .disabled(!controller.isModelReady || !controller.permissionsReady)
 
+            if controller.historyEnabled {
+                RecentMenu(controller: controller)
+            }
+
             Divider()
             footer
         }
@@ -120,6 +124,37 @@ struct MenuContentView: View {
             Button("Quit") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.link)
         }
+    }
+}
+
+/// Re-insert a recent dictation into the frontmost app. Offered only from the
+/// menubar (the user's target app is still frontmost here, unlike the Settings
+/// window). Types via the normal injectors, honouring focus/secure-field guards. (007)
+struct RecentMenu: View {
+    @Bindable var controller: DictationController
+    @State private var recents: [HistoryRecord] = []
+
+    var body: some View {
+        Menu {
+            if recents.isEmpty {
+                Text("No history yet")
+            } else {
+                ForEach(recents) { r in
+                    Button(label(r)) { Task { await controller.reinsert(r) } }
+                }
+            }
+        } label: {
+            Label("Re-insert recent", systemImage: "clock.arrow.circlepath")
+                .frame(maxWidth: .infinity)
+        }
+        .menuStyle(.borderlessButton)
+        .disabled(controller.phase.isActive || !controller.permissionsReady)
+        .task { recents = Array((await controller.searchHistory("")).prefix(8)) }  // recent, newest-first
+    }
+
+    private func label(_ r: HistoryRecord) -> String {
+        let oneLine = r.output.replacingOccurrences(of: "\n", with: " ")
+        return oneLine.count > 48 ? String(oneLine.prefix(48)) + "…" : oneLine
     }
 }
 

@@ -72,6 +72,48 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(c.phase, .idle)
     }
 
+    // 007 — re-insert / copy
+
+    func testReinsertTypesRecordOutput() async {
+        let paste = FakeInjector()
+        let c = make(injector: paste, mode: "clean")  // routing defaults to .insert
+        let record = HistoryRecord(transcript: "raw", output: "Reused text.", modeID: "clean", appBundleID: nil)
+        await c.reinsert(record)
+        XCTAssertEqual(paste.last, "Reused text.")
+    }
+
+    func testReinsertRespectsCopyOnlyRouting() async {
+        let paste = FakeInjector()
+        let clip = FakeInjector()
+        let c = make(injector: paste, clipboardInjector: clip)
+        c.outputRouting = .copyOnly
+        await c.reinsert(HistoryRecord(transcript: "x", output: "Copied reuse.", modeID: "clean", appBundleID: nil))
+        XCTAssertEqual(clip.last, "Copied reuse.")
+        XCTAssertEqual(paste.count, 0)
+    }
+
+    func testCopyToClipboardUsesClipboardInjector() async {
+        let paste = FakeInjector()
+        let clip = FakeInjector()
+        let c = make(injector: paste, clipboardInjector: clip)
+        await c.copyToClipboard("clip me")
+        XCTAssertEqual(clip.last, "clip me")
+        XCTAssertEqual(paste.count, 0)
+    }
+
+    func testReinsertNoOpWhileActive() async {
+        let paste = FakeInjector()
+        let c = make(injector: paste, mode: "clean")
+        await c.warmModel()
+        c.startDictation()
+        try? await Task.sleep(for: .milliseconds(80))
+        XCTAssertTrue(c.phase.isActive)
+        await c.reinsert(HistoryRecord(transcript: "x", output: "ignored", modeID: "clean", appBundleID: nil))
+        XCTAssertEqual(paste.count, 0)  // refused while a session is live
+        c.stopDictation()
+        await waitForTerminal(c)
+    }
+
     func testRawHappyPathInjectsCleanedText() async {
         let injector = FakeInjector()
         let c = make(stt: FakeSTTEngine(finalText: "hello world"), injector: injector, mode: "clean")
