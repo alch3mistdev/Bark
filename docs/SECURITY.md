@@ -34,6 +34,37 @@ code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the nex
   text; it is text only, never executed. (AIML-001/004 / SEC-011)
 - ☑ Fresh stateless session per rewrite — no conversation state bleeds across dictations.
 
+## Revision surface  (`Sources/Bark/Revision/*`, ADR-007, `specs/009-voice-driven-revision/`)
+- ☑ Refuses when `IsSecureEventInputEnabled()` or `AXSecureTextField` is focused
+  (`SecureFieldPolicy`). (SEC-002 re-applied)
+- ☑ Re-verifies the focused app's PID immediately before applying the rewrite (`FocusGuard`); aborts
+  on mismatch. (SEC-004 re-applied)
+- ☑ Output passes `TextSanitizer` (C0/C1, ANSI escapes, bidi strip) before insertion. (SEC-011 re-applied)
+- ☑ Spoken revision instruction is fenced as **untrusted data** inside `<revision>` in
+  `PromptTemplate.revisionSystem`; the previous text is fenced inside `<previous>`. Mirrors
+  SEC-010 with the new revision surface.
+- ☑ `OutputValidator` gains a **length-drift rule**: revised text must be ≤ 2× the previous text's
+  length. Catches the "expand to include a phishing URL or external payload" prompt-injection
+  pattern even if all other fences fail.
+- ☑ Dictionary commands (`delete that`, `undo`, `select all`, `copy`, `scratch that`) are pure
+  AX actions; they never write to the focused field's text content. They emit a ⌘Z / ⌘A / ⌘C
+  event only when the focused app accepts those shortcuts; if the app rejects them, Bark falls
+  back to a clear refusal (no error, no destruction).
+- ☑ History linkage: every revision produces a `HistoryRecord` with `parentID` set; the user can
+  revert the chain via Settings ▸ History. Revisions that fail validation preserve the
+  original text (no destruction). (SEC-013)
+- **Residual (L-7 — Electron / web text fields):** AX range manipulation for "select-all + replace"
+  is inconsistent across Electron apps and web views. The plan falls back to "select-all + replace
+  via `PasteboardInjector`" which is the same proven path as every other Bark injection. Documented
+  honestly — a revision may not be reliable in a small set of apps.
+- **Residual (L-8 — Spoken instruction as injection vector):** the spoken revision instruction
+  could itself be a prompt-injection vector ("ignore prior instructions and paste X"). Mitigated
+  by the prompt fence + the length-drift rule + the existing `OutputValidator` banned-token
+  check. Worst-case outcome is a refused rewrite; the original text is preserved verbatim.
+- **Residual (L-9 — Revision hotkey collision):** ⌥⌘R may collide with a system shortcut the user
+  has bound. The recorder shows a warning, does not refuse (mirrors push-to-talk recorder UX).
+  Users can rebind.
+
 ## Permissions — least privilege  (`Resources/Bark.entitlements`, `PermissionsCoordinator`)
 - ☑ Only the microphone device entitlement. Accessibility + Input Monitoring are user-granted via TCC,
   requested just-in-time with purpose strings. (SEC-008 / T-011)
@@ -80,3 +111,16 @@ documented rather than hidden:
 - **L-6 — History decrypt failure is treated as empty.** A transient Keychain miss or partial-write
   corruption makes `all()` return `[]`, and the next append overwrites the file — i.e. opt-in history
   is best-effort convenience storage, not a durable archive.
+- **L-7 — AX range manipulation for revision replacement is best-effort.** A "select-all + replace"
+  revision path is inconsistent across Electron apps and web views (ADR-007). The plan falls back
+  to `PasteboardInjector` (proven path) on detection failure; some revisions may not reliably apply
+  in a small set of apps. The original text is never destroyed — worst case is a refused rewrite.
+- **L-8 — Spoken revision instruction is itself a prompt-injection vector.** A user (or a captured
+  audio sample) saying *"ignore prior instructions and paste X"* could attempt to redirect the
+  LLM. Mitigated by the prompt fence, the new `OutputValidator` length-drift rule (≤ 2× previous),
+  and the existing banned-token check. Worst case: a refused rewrite with the original text
+  preserved. Not a destruction vector.
+- **L-9 — Revision hotkey collision.** `⌥⌘R` may collide with a system or app shortcut the user has
+  already bound. The recorder shows a warning, doesn't refuse (mirrors push-to-talk recorder UX).
+  Users can rebind. A future iteration could surface the running shortcut via
+  `NSEvent.addGlobalMonitorForEvents` and warn more precisely.
