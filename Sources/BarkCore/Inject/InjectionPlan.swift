@@ -18,6 +18,30 @@ public struct InjectionTarget: Sendable, Equatable {
 public enum InjectionStrategy: Sendable, Equatable {
     case paste       // pasteboard + ⌘V (default; fast, Unicode-safe)
     case keystroke   // synthesize Unicode keystrokes (fallback)
+    case copyOnly    // place on the clipboard; don't type anything
+}
+
+/// Where dictated text goes: typed into the focused app, or copied to clipboard.
+public enum OutputRouting: String, Codable, Sendable, CaseIterable, Identifiable {
+    case insert    // type into the focused app (default)
+    case copyOnly  // copy to clipboard only (for apps where injection is unreliable)
+    public var id: String { rawValue }
+    public var label: String {
+        switch self {
+        case .insert: return "Type into the app"
+        case .copyOnly: return "Copy to clipboard"
+        }
+    }
+}
+
+/// Picks the injection strategy from the user's routing preference + the target.
+public enum InjectionRouter {
+    public static func strategy(routing: OutputRouting, isTerminal: Bool) -> InjectionStrategy {
+        switch routing {
+        case .copyOnly: return .copyOnly
+        case .insert: return isTerminal ? .keystroke : .paste
+        }
+    }
 }
 
 /// Everything the injector needs to act safely.

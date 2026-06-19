@@ -35,6 +35,21 @@ public protocol HistoryStore: Sendable {
     func purge() async throws
 }
 
+extension HistoryStore {
+    /// Most recent `limit` records, newest-first. (007)
+    public func recent(limit: Int = RetentionPolicy.defaultLimit) async -> [HistoryRecord] {
+        RetentionPolicy.trim(await all(), limit: limit)
+    }
+
+    /// Records matching `text` (case/diacritic-insensitive over transcript+output),
+    /// newest-first and trimmed. Empty `text` → `recent`. Composes `HistoryQuery`
+    /// with `all()`, so concrete stores need no change. (007)
+    public func search(_ text: String, limit: Int = RetentionPolicy.defaultLimit) async -> [HistoryRecord] {
+        let matched = HistoryQuery.filter(await all(), matching: text)
+        return RetentionPolicy.trim(matched, limit: limit)
+    }
+}
+
 /// Pure retention logic: keep the most recent `limit` records (newest first).
 public enum RetentionPolicy {
     public static let defaultLimit = 200

@@ -28,6 +28,7 @@ public final class DictationController {
     public private(set) var isModelReady = false
     public private(set) var llmStatus: LLMStatus = .unavailable
     public private(set) var handsFreeActive = false
+    public private(set) var isReinserting = false   // serializes one-click re-insert (Codex)
 
     /// Side-channel callbacks wired by the app layer (AppKit windows/HUD).
     public var onPhaseChange: (@MainActor (DictationPhase) -> Void)?
@@ -45,6 +46,7 @@ public final class DictationController {
     private let llmCleaner: TextCleaner?
     private let pasteInjector: TextInjector
     private let keystrokeInjector: TextInjector
+    private let clipboardInjector: TextInjector
     private let history: HistoryStore?
     private let cleanupDeadline: Double
     private let targetProvider: @MainActor () -> InjectionTarget?
@@ -56,6 +58,7 @@ public final class DictationController {
     private var finalSegments: [String] = []
     private var volatileTail = ""
     private var capturedTarget: InjectionTarget?
+    private var reinsertTarget: InjectionTarget?   // frontmost app snapshotted when the re-insert UI opened
     private var prepareToken = 0
     private var llmTask: Task<Void, Never>?
     private var handsFreeTask: Task<Void, Never>?
@@ -72,6 +75,7 @@ public final class DictationController {
         audioFactory: @escaping @Sendable () -> AudioCapturing = { AudioCaptureEngine() },
         pasteInjector: TextInjector = PasteboardInjector(),
         keystrokeInjector: TextInjector = KeystrokeInjector(),
+        clipboardInjector: TextInjector = ClipboardInjector(),
         cleanupDeadline: Double = 8,
         targetProvider: @escaping @MainActor () -> InjectionTarget? = { FocusProbe.currentTarget() }
     ) {
@@ -85,6 +89,7 @@ public final class DictationController {
         self.audioFactory = audioFactory
         self.pasteInjector = pasteInjector
         self.keystrokeInjector = keystrokeInjector
+        self.clipboardInjector = clipboardInjector
         self.cleanupDeadline = cleanupDeadline
         self.targetProvider = targetProvider
         self.llmStatus = (llmCleaner != nil) ? .notLoaded : .unavailable
@@ -102,6 +107,23 @@ public final class DictationController {
     }
 
     public var currentMode: Mode { modes.first { $0.id == selectedModeID } ?? .clean }
+
+    /// Mode for the current dictation: per-app mapping (resolved from the
+    /// start-time target) if present, else the manual selection.
+    private func effectiveMode() -> Mode {
+        let id = AppModeResolver.modeID(forBundleID: capturedTarget?.bundleID,
+                                        map: settings.settings.appModeMap,
+                                        availableModeIDs: Set(modes.map(\.id)),
+                                        fallback: selectedModeID)
+        return modes.first { $0.id == id } ?? .clean
+    }
+
+    public var appModeMap: [String: String] { settings.settings.appModeMap }
+
+    public func setAppMode(bundleID: String, modeID: String?) {
+        guard !bundleID.isEmpty else { return }
+        settings.update { $0.appModeMap[bundleID] = modeID }
+    }
 
     public var hotkeySetting: HotkeySetting {
         get { settings.settings.hotkey }
@@ -220,6 +242,65 @@ public final class DictationController {
         await history?.all() ?? []
     }
 
+    /// Search saved history (case/diacritic-insensitive); empty query → recent. (007)
+    public func searchHistory(_ query: String) async -> [HistoryRecord] {
+        await history?.search(query) ?? []
+    }
+
+    /// Re-use a past dictation by copying it to the clipboard. The safe path from
+    /// the Settings window (frontmost), where typing would land in the wrong app.
+    /// Marks the payload concealed; never restores the clipboard. (007)
+    public func copyToClipboard(_ text: String) async {
+        let plan = InjectionPlan(target: InjectionTarget(pid: 0, bundleID: nil), strategy: .copyOnly)
+        do {
+            try await clipboardInjector.inject(text, plan: plan)
+            lastResult = text
+            if soundFeedback { Feedback.inserted() }
+        } catch {
+            lastError = Self.injectionMessage(error)
+        }
+    }
+
+    /// Snapshot the frontmost (non-Bark) app when the re-insert UI appears, so a
+    /// later one-click re-insert targets the app the user was actually in — not
+    /// whatever is frontmost after they interact with Bark's menu (Codex/ADV-004).
+    /// Bark itself (the popover holding key focus) is never a valid target.
+    public func snapshotReinsertTarget() {
+        let t = targetProvider()
+        reinsertTarget = (t?.pid == ProcessInfo.processInfo.processIdentifier) ? nil : t
+    }
+
+    /// Type a past dictation into the app captured by `snapshotReinsertTarget`.
+    /// Re-verifies that app is still frontmost immediately before injecting (the
+    /// injector's preflight compares the snapshot's pid against the live focus, so
+    /// a focus drift to Bark/another app refuses rather than mis-targets). Honours
+    /// the secure-field guard and output routing. Serialized so rapid clicks can't
+    /// overlap on the shared pasteboard (Codex). No-op while a dictation is active
+    /// or another re-insert is in flight. (007 / ADV-004)
+    public func reinsert(_ record: HistoryRecord) async {
+        guard !phase.isActive, !isReinserting else { return }
+        guard let target = reinsertTarget else {
+            lastError = Self.injectionMessage(InjectionError.focusChanged); return
+        }
+        let sanitized = TextSanitizer.sanitize(
+            record.output,
+            options: .init(allowNewlines: !target.isTerminal, stripTrailingNewlines: true)
+        )
+        guard !sanitized.isEmpty else { return }
+        let strategy = InjectionRouter.strategy(routing: settings.settings.outputRouting,
+                                                isTerminal: target.isTerminal)
+        let plan = InjectionPlan(target: target, strategy: strategy, stripTrailingNewlines: true)
+        isReinserting = true
+        defer { isReinserting = false }
+        do {
+            try await injector(for: strategy).inject(sanitized, plan: plan)
+            lastResult = sanitized
+            if soundFeedback { Feedback.inserted() }
+        } catch {
+            lastError = Self.injectionMessage(error)
+        }
+    }
+
     public func purgeHistory() async {
         try? await history?.purge()
     }
@@ -241,6 +322,11 @@ public final class DictationController {
     public var soundFeedback: Bool {
         get { settings.settings.soundFeedback }
         set { settings.update { $0.soundFeedback = newValue } }
+    }
+
+    public var outputRouting: OutputRouting {
+        get { settings.settings.outputRouting }
+        set { settings.update { $0.outputRouting = newValue } }
     }
 
     public func requestPermission(_ kind: PermissionKind) {
@@ -396,7 +482,7 @@ public final class DictationController {
             return
         }
 
-        let mode = currentMode
+        let mode = effectiveMode()
         let cleaned = await produceText(transcript, mode: mode)
         await inject(cleaned, transcript: transcript, mode: mode)
     }
@@ -466,11 +552,10 @@ public final class DictationController {
         guard !sanitized.isEmpty else { reset(); return }
 
         phase = machine.phase  // produceText already left the machine in .injecting
-        let plan = InjectionPlan(target: target,
-                                 strategy: target.isTerminal ? .keystroke : .paste,
-                                 stripTrailingNewlines: true)
-        let injector = plan.strategy == .keystroke ? keystrokeInjector : pasteInjector
-        try await injector.inject(sanitized, plan: plan)
+        let strategy = InjectionRouter.strategy(routing: settings.settings.outputRouting,
+                                                isTerminal: target.isTerminal)
+        let plan = InjectionPlan(target: target, strategy: strategy, stripTrailingNewlines: true)
+        try await injector(for: strategy).inject(sanitized, plan: plan)
 
         machine.handle(.injected)
         phase = machine.phase
@@ -478,6 +563,14 @@ public final class DictationController {
         if soundFeedback { Feedback.inserted() }
         recordHistory(transcript: transcript, output: sanitized, mode: mode, target: target)
         reset()
+    }
+
+    private func injector(for strategy: InjectionStrategy) -> TextInjector {
+        switch strategy {
+        case .copyOnly:  return clipboardInjector
+        case .keystroke: return keystrokeInjector
+        case .paste:     return pasteInjector
+        }
     }
 
     static func injectionMessage(_ error: Error) -> String {
@@ -517,12 +610,14 @@ public final class DictationController {
         phase = machine.phase
         feedTask?.cancel(); resultTask?.cancel()
         audio?.stop(); audio = nil
+        capturedTarget = nil   // don't let a dead session's target bleed into per-app mode (ADV-003)
         Task { await stt.cancel() }
     }
 
     private func reset() {
         feedTask = nil; resultTask = nil
         audio = nil
+        capturedTarget = nil   // effectiveMode falls back to the manual selection until the next start (ADV-003)
         machine.handle(.reset)
         phase = machine.phase
         liveText = ""
@@ -534,6 +629,7 @@ public final class DictationController {
         feedTask?.cancel(); resultTask?.cancel()
         feedTask = nil; resultTask = nil
         audio?.stop(); audio = nil
+        capturedTarget = nil   // (ADV-003)
         Task { await stt.cancel() }
         machine.handle(.reset)
         phase = machine.phase
@@ -654,7 +750,7 @@ public final class DictationController {
                 if transcript.isEmpty {
                     machine.handle(.reset); phase = machine.phase
                 } else {
-                    let mode = currentMode
+                    let mode = effectiveMode()
                     machine.handle(.transcriptFinalized); phase = machine.phase
                     let cleaned = await produceText(transcript, mode: mode)
                     // Toggled off (or cancelled) during cleanup → do NOT inject (Codex).

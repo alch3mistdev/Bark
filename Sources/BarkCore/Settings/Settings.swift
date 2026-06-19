@@ -45,6 +45,7 @@ public struct HotkeySetting: Codable, Sendable, Equatable {
 public struct Settings: Codable, Sendable, Equatable {
     public var selectedModeID: String
     public var customModes: [Mode]
+    public var appModeMap: [String: String]   // focused-app bundleID → modeID
     public var localeID: String
     public var hotkey: HotkeySetting
     public var handsFreeHotkey: HotkeySetting
@@ -53,12 +54,14 @@ public struct Settings: Codable, Sendable, Equatable {
     public var historyEnabled: Bool
     public var llmEnabled: Bool
     public var restoreClipboard: Bool
+    public var outputRouting: OutputRouting
     public var soundFeedback: Bool
     public var hasCompletedOnboarding: Bool
 
     public init(
         selectedModeID: String = Mode.clean.id,
         customModes: [Mode] = [],
+        appModeMap: [String: String] = [:],
         localeID: String = "en-US",
         hotkey: HotkeySetting = .default,
         handsFreeHotkey: HotkeySetting = HotkeySetting(kind: .keyToggle, keyCode: 96, modifierFlags: 0),
@@ -67,11 +70,13 @@ public struct Settings: Codable, Sendable, Equatable {
         historyEnabled: Bool = false,
         llmEnabled: Bool = false,   // opt-in: enabling triggers the ~2.5 GB model download (consent)
         restoreClipboard: Bool = true,
+        outputRouting: OutputRouting = .insert,
         soundFeedback: Bool = true,
         hasCompletedOnboarding: Bool = false
     ) {
         self.selectedModeID = selectedModeID
         self.customModes = customModes
+        self.appModeMap = appModeMap
         self.localeID = localeID
         self.hotkey = hotkey
         self.handsFreeHotkey = handsFreeHotkey
@@ -80,6 +85,7 @@ public struct Settings: Codable, Sendable, Equatable {
         self.historyEnabled = historyEnabled
         self.llmEnabled = llmEnabled
         self.restoreClipboard = restoreClipboard
+        self.outputRouting = outputRouting
         self.soundFeedback = soundFeedback
         self.hasCompletedOnboarding = hasCompletedOnboarding
     }
@@ -92,6 +98,7 @@ public struct Settings: Codable, Sendable, Equatable {
         let d = Settings.default
         selectedModeID = try c.decodeIfPresent(String.self, forKey: .selectedModeID) ?? d.selectedModeID
         customModes = try c.decodeIfPresent([Mode].self, forKey: .customModes) ?? d.customModes
+        appModeMap = try c.decodeIfPresent([String: String].self, forKey: .appModeMap) ?? d.appModeMap
         localeID = try c.decodeIfPresent(String.self, forKey: .localeID) ?? d.localeID
         hotkey = try c.decodeIfPresent(HotkeySetting.self, forKey: .hotkey) ?? d.hotkey
         handsFreeHotkey = try c.decodeIfPresent(HotkeySetting.self, forKey: .handsFreeHotkey) ?? d.handsFreeHotkey
@@ -100,6 +107,7 @@ public struct Settings: Codable, Sendable, Equatable {
         historyEnabled = try c.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? d.historyEnabled
         llmEnabled = try c.decodeIfPresent(Bool.self, forKey: .llmEnabled) ?? d.llmEnabled
         restoreClipboard = try c.decodeIfPresent(Bool.self, forKey: .restoreClipboard) ?? d.restoreClipboard
+        outputRouting = try c.decodeIfPresent(OutputRouting.self, forKey: .outputRouting) ?? d.outputRouting
         soundFeedback = try c.decodeIfPresent(Bool.self, forKey: .soundFeedback) ?? d.soundFeedback
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? d.hasCompletedOnboarding
     }

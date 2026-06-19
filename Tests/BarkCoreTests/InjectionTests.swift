@@ -55,4 +55,26 @@ final class InjectionTests: XCTestCase {
         let captured = InjectionTarget(pid: 7, bundleID: nil)
         XCTAssertFalse(FocusGuard.targetUnchanged(captured: captured, current: nil))
     }
+
+    // MARK: Output routing (006)
+
+    func testRoutingCopyOnlyWinsEverywhere() {
+        XCTAssertEqual(InjectionRouter.strategy(routing: .copyOnly, isTerminal: false), .copyOnly)
+        XCTAssertEqual(InjectionRouter.strategy(routing: .copyOnly, isTerminal: true), .copyOnly)
+    }
+
+    func testRoutingInsertUsesPasteForNormalApps() {
+        XCTAssertEqual(InjectionRouter.strategy(routing: .insert, isTerminal: false), .paste)
+    }
+
+    func testRoutingInsertUsesKeystrokeForTerminals() {
+        XCTAssertEqual(InjectionRouter.strategy(routing: .insert, isTerminal: true), .keystroke)
+    }
+
+    func testOutputRoutingCodableRoundTrip() throws {
+        for routing in OutputRouting.allCases {
+            let data = try JSONEncoder().encode(routing)
+            XCTAssertEqual(try JSONDecoder().decode(OutputRouting.self, from: data), routing)
+        }
+    }
 }
