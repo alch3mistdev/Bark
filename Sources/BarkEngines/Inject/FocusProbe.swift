@@ -16,9 +16,14 @@ public enum FocusProbe {
     /// top-left global coordinates. Used only to anchor the (non-activating) HUD;
     /// nil for apps that don't expose it, so the caller falls back to a fixed spot.
     /// Reads bounds only — never the field's contents.
-    @MainActor
-    public static func focusedCaretRect() -> CGRect? {
+    ///
+    /// `nonisolated` so the caller can run it OFF the main actor: the AX IPC is
+    /// synchronous and a hung/modal focused app would otherwise stall the main
+    /// thread at HUD-show time (Codex/ADV-003). A short messaging timeout bounds
+    /// the worst case regardless.
+    nonisolated public static func focusedCaretRect() -> CGRect? {
         let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 0.25)
         var focused: CFTypeRef?
         guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
               let element = focused, CFGetTypeID(element) == AXUIElementGetTypeID()

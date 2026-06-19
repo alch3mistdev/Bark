@@ -88,14 +88,21 @@ final class FakeCleaner: TextCleaner, @unchecked Sendable {
 /// stopped — drives the VAD in hands-free tests.
 final class ScriptedAudioCapture: AudioCapturing, @unchecked Sendable {
     private let levels: [Float]
+    private let autoFinish: Bool
     private var cont: AsyncStream<AudioFrames>.Continuation?
 
-    init(rmsLevels: [Float]) { self.levels = rmsLevels }
+    /// `autoFinish` finishes the stream after the last frame, simulating an
+    /// abnormal end (device loss) where `stop()` is never called.
+    init(rmsLevels: [Float], autoFinish: Bool = false) {
+        self.levels = rmsLevels
+        self.autoFinish = autoFinish
+    }
 
     func start() throws -> AsyncStream<AudioFrames> {
         let (stream, c) = AsyncStream<AudioFrames>.makeStream()
         cont = c
         let levels = self.levels
+        let autoFinish = self.autoFinish
         Task {
             for (i, level) in levels.enumerated() {
                 // Constant samples → RMS == level.
@@ -103,7 +110,8 @@ final class ScriptedAudioCapture: AudioCapturing, @unchecked Sendable {
                 c.yield(AudioFrames(samples: samples, sequence: UInt64(i)))
                 try? await Task.sleep(for: .milliseconds(3))
             }
-            // leave the stream open; stop() finishes it
+            if autoFinish { c.finish() }   // stream dies on its own; stop() never called
+            // else leave the stream open; stop() finishes it
         }
         return stream
     }

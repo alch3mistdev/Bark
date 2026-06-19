@@ -382,6 +382,7 @@ public final class DictationController {
         handsFreeTask?.cancel()
         audio?.stop()
         handsFreeAudio?.stop()
+        inputLevel = 0   // don't leave a frozen meter behind (ADV-001)
     }
 
     private func prepareModel() async {
@@ -785,6 +786,18 @@ public final class DictationController {
                 vad.reset()
                 finalSegments = []; volatileTail = ""; liveText = ""
             }
+        }
+        // Stream ended (device loss / abnormal finish). Clear the meter and, if we
+        // still believe we're live, tear the session down so the HUD doesn't freeze
+        // and the next hotkey isn't silently swallowed (ADV-001). If stopHandsFree
+        // drove us here it already flipped handsFreeActive off, so this is a no-op.
+        inputLevel = 0
+        if handsFreeActive {
+            handsFreeActive = false
+            handsFreeAudio?.stop(); handsFreeAudio = nil
+            machine.handle(.reset); phase = machine.phase
+            liveText = ""
+            onHandsFreeChange?(false)
         }
     }
 
