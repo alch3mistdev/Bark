@@ -15,7 +15,8 @@ struct RecordingHUDView: View {
                 .frame(width: 22)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(controller.phase.title)
+                Text(controller.handsFreeActive && !controller.phase.isActive
+                     ? "Hands-free — listening…" : controller.phase.title)
                     .font(.caption.weight(.semibold))
                 if !controller.liveText.isEmpty {
                     Text(controller.liveText)

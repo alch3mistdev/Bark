@@ -13,7 +13,8 @@ enum CompositionRoot {
     static func makeController() -> DictationController {
         let settings = SettingsStore()
         let permissions = PermissionsCoordinator()
-        let hotkey = HotkeyManager()                 // restored from settings in activate()
+        let hotkey = HotkeyManager()                 // push-to-talk; restored from settings in activate()
+        let handsFreeHotkey = HotkeyManager()        // hands-free toggle
         let stt: STTEngine = SpeechAnalyzerEngine()  // Apple on-device, macOS 26
         let history: HistoryStore = EncryptedHistoryStore()
 
@@ -29,6 +30,7 @@ enum CompositionRoot {
             permissions: permissions,
             hotkey: hotkey,
             stt: stt,
+            handsFreeHotkey: handsFreeHotkey,
             llmCleaner: llm,
             history: history
         )

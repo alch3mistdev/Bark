@@ -47,6 +47,8 @@ public struct Settings: Codable, Sendable, Equatable {
     public var customModes: [Mode]
     public var localeID: String
     public var hotkey: HotkeySetting
+    public var handsFreeHotkey: HotkeySetting
+    public var vadSensitivity: VADSensitivity
     public var launchAtLogin: Bool
     public var historyEnabled: Bool
     public var llmEnabled: Bool
@@ -59,6 +61,8 @@ public struct Settings: Codable, Sendable, Equatable {
         customModes: [Mode] = [],
         localeID: String = "en-US",
         hotkey: HotkeySetting = .default,
+        handsFreeHotkey: HotkeySetting = HotkeySetting(kind: .keyToggle, keyCode: 96, modifierFlags: 0),
+        vadSensitivity: VADSensitivity = .medium,
         launchAtLogin: Bool = false,
         historyEnabled: Bool = false,
         llmEnabled: Bool = false,   // opt-in: enabling triggers the ~2.5 GB model download (consent)
@@ -70,6 +74,8 @@ public struct Settings: Codable, Sendable, Equatable {
         self.customModes = customModes
         self.localeID = localeID
         self.hotkey = hotkey
+        self.handsFreeHotkey = handsFreeHotkey
+        self.vadSensitivity = vadSensitivity
         self.launchAtLogin = launchAtLogin
         self.historyEnabled = historyEnabled
         self.llmEnabled = llmEnabled
@@ -88,6 +94,8 @@ public struct Settings: Codable, Sendable, Equatable {
         customModes = try c.decodeIfPresent([Mode].self, forKey: .customModes) ?? d.customModes
         localeID = try c.decodeIfPresent(String.self, forKey: .localeID) ?? d.localeID
         hotkey = try c.decodeIfPresent(HotkeySetting.self, forKey: .hotkey) ?? d.hotkey
+        handsFreeHotkey = try c.decodeIfPresent(HotkeySetting.self, forKey: .handsFreeHotkey) ?? d.handsFreeHotkey
+        vadSensitivity = try c.decodeIfPresent(VADSensitivity.self, forKey: .vadSensitivity) ?? d.vadSensitivity
         launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? d.launchAtLogin
         historyEnabled = try c.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? d.historyEnabled
         llmEnabled = try c.decodeIfPresent(Bool.self, forKey: .llmEnabled) ?? d.llmEnabled

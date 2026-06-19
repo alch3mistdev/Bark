@@ -10,18 +10,30 @@ final class RecordingHUDController {
     private let controller: DictationController
     private var panel: NSPanel?
     private var hideWorkItem: DispatchWorkItem?
+    private var handsFree = false
 
     init(controller: DictationController) {
         self.controller = controller
     }
 
     func handlePhase(_ phase: DictationPhase) {
-        if phase.isActive {
+        if phase.isActive || handsFree {
             hideWorkItem?.cancel()
             show()
         } else {
             // Linger briefly on completed/failed so the user sees the outcome.
             scheduleHide(after: phase.isError ? 2.5 : 0.8)
+        }
+    }
+
+    /// Keep the HUD visible for the whole hands-free session (between utterances too).
+    func setHandsFree(_ active: Bool) {
+        handsFree = active
+        if active {
+            hideWorkItem?.cancel()
+            show()
+        } else {
+            scheduleHide(after: 0.4)
         }
     }
 

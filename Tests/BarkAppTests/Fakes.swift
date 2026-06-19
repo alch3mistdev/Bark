@@ -10,16 +10,19 @@ import Foundation
 final class FakeSTTEngine: STTEngine, @unchecked Sendable {
     let finalText: String
     let prepareError: Error?
+    let beginStreamError: Error?
     private var cont: AsyncThrowingStream<STTResult, Error>.Continuation?
 
-    init(finalText: String = "hello world", prepareError: Error? = nil) {
+    init(finalText: String = "hello world", prepareError: Error? = nil, beginStreamError: Error? = nil) {
         self.finalText = finalText
         self.prepareError = prepareError
+        self.beginStreamError = beginStreamError
     }
 
     func prepare(locale: String) async throws { if let prepareError { throw prepareError } }
 
     func beginStream() async throws -> AsyncThrowingStream<STTResult, Error> {
+        if let beginStreamError { throw beginStreamError }
         let (stream, c) = AsyncThrowingStream<STTResult, Error>.makeStream()
         cont = c
         return stream
@@ -79,6 +82,33 @@ final class FakeCleaner: TextCleaner, @unchecked Sendable {
         case .hang: try await Task.sleep(for: .seconds(60)); return text
         }
     }
+}
+
+/// Emits frames whose RMS equals each scripted level, then stays open until
+/// stopped — drives the VAD in hands-free tests.
+final class ScriptedAudioCapture: AudioCapturing, @unchecked Sendable {
+    private let levels: [Float]
+    private var cont: AsyncStream<AudioFrames>.Continuation?
+
+    init(rmsLevels: [Float]) { self.levels = rmsLevels }
+
+    func start() throws -> AsyncStream<AudioFrames> {
+        let (stream, c) = AsyncStream<AudioFrames>.makeStream()
+        cont = c
+        let levels = self.levels
+        Task {
+            for (i, level) in levels.enumerated() {
+                // Constant samples → RMS == level.
+                let samples = [Float](repeating: level, count: 1600)
+                c.yield(AudioFrames(samples: samples, sequence: UInt64(i)))
+                try? await Task.sleep(for: .milliseconds(3))
+            }
+            // leave the stream open; stop() finishes it
+        }
+        return stream
+    }
+
+    func stop() { cont?.finish(); cont = nil }
 }
 
 /// Cleaner with a controllable prepare/download (progress, cancel, success/fail)

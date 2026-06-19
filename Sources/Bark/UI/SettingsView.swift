@@ -180,6 +180,22 @@ private struct HotkeyPane: View {
                      + "key (F1–F20) to toggle dictation on/off. Changes apply immediately.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+
+            Section("Hands-free") {
+                Toggle("Hands-free dictation", isOn: Binding(
+                    get: { controller.handsFreeActive },
+                    set: { $0 ? controller.startHandsFree() : controller.stopHandsFree() }
+                ))
+                LabeledContent("Toggle key") {
+                    HotkeyRecorder(setting: $controller.handsFreeHotkeySetting)
+                }
+                Picker("Sensitivity", selection: $controller.vadSensitivity) {
+                    ForEach(VADSensitivity.allCases) { Text($0.label).tag($0) }
+                }
+                Text("When on, Bark records whenever you speak and inserts when you pause — no button to "
+                     + "hold. Press the toggle key (default F5) to turn it on/off.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .onAppear { mode = HotkeyPreset.from(controller.hotkeySetting) }
