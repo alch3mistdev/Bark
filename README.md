@@ -42,7 +42,7 @@ touching the pipeline. See `docs/ADRs.md`.
 
 ```bash
 swift build            # fully offline, no external dependencies
-swift test             # 94 tests (core logic + controller orchestration + history crypto + STT backends)
+swift test             # 102 tests (core logic + controller orchestration + history crypto + STT backends + model inspector)
 
 # Build a draggable installer (ad-hoc signed for personal use):
 scripts/make-dmg.sh
@@ -144,7 +144,7 @@ Bark (SwiftUI MenuBarExtra)
 
 ## Status
 
-**Built & verified** (`swift build` clean + **94 passing tests**): the full record → STT → cleanup →
+**Built & verified** (`swift build` clean + **102 passing tests**): the full record → STT → cleanup →
 inject pipeline, global hotkey (push-to-talk + consumed toggle), all six modes + custom modes,
 deterministic cleaner, settings persistence, launch-at-login, encrypted opt-in history, onboarding,
 and `.app`/DMG packaging. The MLX LLM engine is verified to compile/link via `Package-mlx.swift`.
@@ -155,11 +155,11 @@ controller orchestration via injected fakes (raw/LLM paths, LLM failure+timeout 
 secure-field refusal, empty-transcript, restart-after-failure) **and** the history crypto round-trip,
 wrong-key, and no-clobber behavior (`BarkAppTests`).
 
-**Designed, wired via protocols, not yet implemented**: a model-manager UI for inspecting the
-SHA-256-verified cache, and the Developer-ID notarization pipeline (`scripts/make-app.sh`
-documents the `notarytool` steps). The WhisperKit and Parakeet STT adapters are wired
-(`Sources/BarkEngines/STT/{WhisperKitEngine,ParakeetEngine}.swift`) and gated behind
-`Package-stt-extras.swift`; see ADR-006.
+**Designed, wired via protocols, not yet implemented**: the Developer-ID notarization pipeline
+(`scripts/make-app.sh` documents the `notarytool` steps). The WhisperKit and Parakeet STT adapters
+are wired (`Sources/BarkEngines/STT/{WhisperKitEngine,ParakeetEngine}.swift`) and gated behind
+`Package-stt-extras.swift`; see ADR-006. The model-manager UI for inspecting the SHA-256-verified
+cache lives at Settings ▸ Models.
 
 > Note: live end-to-end behavior (mic → paste) and the SMAppService login item require running the
 > installed `.app` and granting TCC permissions interactively — they can't be exercised in a headless
