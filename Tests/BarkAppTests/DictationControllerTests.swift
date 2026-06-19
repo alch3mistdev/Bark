@@ -11,7 +11,7 @@ final class DictationControllerTests: XCTestCase {
         stt: FakeSTTEngine = FakeSTTEngine(),
         cleaner: FakeCleaner = FakeCleaner(.ok("UNUSED")),
         injector: FakeInjector = FakeInjector(),
-        clipboardInjector: FakeInjector = FakeInjector(),
+        clipboardInjector: TextInjector = FakeInjector(),
         mode: String = "clean",
         llmEnabled: Bool = true,
         deadline: Double = 0.3
@@ -77,9 +77,19 @@ final class DictationControllerTests: XCTestCase {
     func testReinsertTypesRecordOutput() async {
         let paste = FakeInjector()
         let c = make(injector: paste, mode: "clean")  // routing defaults to .insert
+        c.snapshotReinsertTarget()  // capture the (non-Bark) test target first
         let record = HistoryRecord(transcript: "raw", output: "Reused text.", modeID: "clean", appBundleID: nil)
         await c.reinsert(record)
         XCTAssertEqual(paste.last, "Reused text.")
+    }
+
+    func testReinsertWithoutSnapshotRefuses() async {
+        // No snapshot → no captured target → refuse (don't guess a destination).
+        let paste = FakeInjector()
+        let c = make(injector: paste, mode: "clean")
+        await c.reinsert(HistoryRecord(transcript: "x", output: "nope", modeID: "clean", appBundleID: nil))
+        XCTAssertEqual(paste.count, 0)
+        XCTAssertNotNil(c.lastError)
     }
 
     func testReinsertRespectsCopyOnlyRouting() async {
@@ -87,9 +97,27 @@ final class DictationControllerTests: XCTestCase {
         let clip = FakeInjector()
         let c = make(injector: paste, clipboardInjector: clip)
         c.outputRouting = .copyOnly
+        c.snapshotReinsertTarget()
         await c.reinsert(HistoryRecord(transcript: "x", output: "Copied reuse.", modeID: "clean", appBundleID: nil))
         XCTAssertEqual(clip.last, "Copied reuse.")
         XCTAssertEqual(paste.count, 0)
+    }
+
+    func testConcurrentReinsertsSerialize() async {
+        // A second re-insert while one is in flight is refused (Codex: rapid
+        // double-click must not overlap on the shared pasteboard).
+        let clip = GatedInjector()
+        let c = make(clipboardInjector: clip)
+        c.outputRouting = .copyOnly
+        c.snapshotReinsertTarget()
+        let rec = HistoryRecord(transcript: "x", output: "text", modeID: "clean", appBundleID: nil)
+        let t1 = Task { await c.reinsert(rec) }
+        try? await Task.sleep(for: .milliseconds(40))  // let t1 suspend inside inject
+        let t2 = Task { await c.reinsert(rec) }
+        try? await Task.sleep(for: .milliseconds(40))
+        XCTAssertEqual(clip.count, 1)  // t2 refused while t1 in flight
+        clip.releaseAll()
+        await t1.value; await t2.value
     }
 
     func testCopyToClipboardUsesClipboardInjector() async {

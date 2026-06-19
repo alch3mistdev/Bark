@@ -148,8 +148,13 @@ struct RecentMenu: View {
                 .frame(maxWidth: .infinity)
         }
         .menuStyle(.borderlessButton)
-        .disabled(controller.phase.isActive || !controller.permissionsReady)
-        .task { recents = Array((await controller.searchHistory("")).prefix(8)) }  // recent, newest-first
+        .disabled(controller.phase.isActive || controller.isReinserting || !controller.permissionsReady)
+        .task {
+            // Capture the app the user is in BEFORE they open the menu, so re-insert
+            // targets it and not Bark's popover (Codex/ADV-004).
+            controller.snapshotReinsertTarget()
+            recents = Array((await controller.searchHistory("")).prefix(8))  // recent, newest-first
+        }
     }
 
     private func label(_ r: HistoryRecord) -> String {

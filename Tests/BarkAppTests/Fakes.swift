@@ -160,3 +160,24 @@ final class FakeInjector: TextInjector, @unchecked Sendable {
         recorded.append(text)
     }
 }
+
+/// Injector that suspends inside `inject` until `releaseAll()` is called, so a
+/// test can hold an injection "in flight" and prove re-insert serialization.
+@MainActor
+final class GatedInjector: TextInjector {
+    private(set) var count = 0
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    nonisolated init() {}
+
+    func inject(_ text: String, plan: InjectionPlan) async throws {
+        count += 1
+        await withCheckedContinuation { continuations.append($0) }
+    }
+
+    func releaseAll() {
+        let pending = continuations
+        continuations.removeAll()
+        pending.forEach { $0.resume() }
+    }
+}

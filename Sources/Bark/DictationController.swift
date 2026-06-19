@@ -28,6 +28,7 @@ public final class DictationController {
     public private(set) var isModelReady = false
     public private(set) var llmStatus: LLMStatus = .unavailable
     public private(set) var handsFreeActive = false
+    public private(set) var isReinserting = false   // serializes one-click re-insert (Codex)
 
     /// Side-channel callbacks wired by the app layer (AppKit windows/HUD).
     public var onPhaseChange: (@MainActor (DictationPhase) -> Void)?
@@ -57,6 +58,7 @@ public final class DictationController {
     private var finalSegments: [String] = []
     private var volatileTail = ""
     private var capturedTarget: InjectionTarget?
+    private var reinsertTarget: InjectionTarget?   // frontmost app snapshotted when the re-insert UI opened
     private var prepareToken = 0
     private var llmTask: Task<Void, Never>?
     private var handsFreeTask: Task<Void, Never>?
@@ -259,13 +261,25 @@ public final class DictationController {
         }
     }
 
-    /// Type a past dictation into the currently focused app. Only safe from the
-    /// menubar popover, where the user's target app is still frontmost. Honours
-    /// the focus/secure-field guards and the global output routing. No-op while a
-    /// dictation is active. (007)
+    /// Snapshot the frontmost (non-Bark) app when the re-insert UI appears, so a
+    /// later one-click re-insert targets the app the user was actually in — not
+    /// whatever is frontmost after they interact with Bark's menu (Codex/ADV-004).
+    /// Bark itself (the popover holding key focus) is never a valid target.
+    public func snapshotReinsertTarget() {
+        let t = targetProvider()
+        reinsertTarget = (t?.pid == ProcessInfo.processInfo.processIdentifier) ? nil : t
+    }
+
+    /// Type a past dictation into the app captured by `snapshotReinsertTarget`.
+    /// Re-verifies that app is still frontmost immediately before injecting (the
+    /// injector's preflight compares the snapshot's pid against the live focus, so
+    /// a focus drift to Bark/another app refuses rather than mis-targets). Honours
+    /// the secure-field guard and output routing. Serialized so rapid clicks can't
+    /// overlap on the shared pasteboard (Codex). No-op while a dictation is active
+    /// or another re-insert is in flight. (007 / ADV-004)
     public func reinsert(_ record: HistoryRecord) async {
-        guard !phase.isActive else { return }
-        guard let target = targetProvider() else {
+        guard !phase.isActive, !isReinserting else { return }
+        guard let target = reinsertTarget else {
             lastError = Self.injectionMessage(InjectionError.focusChanged); return
         }
         let sanitized = TextSanitizer.sanitize(
@@ -276,6 +290,8 @@ public final class DictationController {
         let strategy = InjectionRouter.strategy(routing: settings.settings.outputRouting,
                                                 isTerminal: target.isTerminal)
         let plan = InjectionPlan(target: target, strategy: strategy, stripTrailingNewlines: true)
+        isReinserting = true
+        defer { isReinserting = false }
         do {
             try await injector(for: strategy).inject(sanitized, plan: plan)
             lastResult = sanitized
@@ -594,12 +610,14 @@ public final class DictationController {
         phase = machine.phase
         feedTask?.cancel(); resultTask?.cancel()
         audio?.stop(); audio = nil
+        capturedTarget = nil   // don't let a dead session's target bleed into per-app mode (ADV-003)
         Task { await stt.cancel() }
     }
 
     private func reset() {
         feedTask = nil; resultTask = nil
         audio = nil
+        capturedTarget = nil   // effectiveMode falls back to the manual selection until the next start (ADV-003)
         machine.handle(.reset)
         phase = machine.phase
         liveText = ""
@@ -611,6 +629,7 @@ public final class DictationController {
         feedTask?.cancel(); resultTask?.cancel()
         feedTask = nil; resultTask = nil
         audio?.stop(); audio = nil
+        capturedTarget = nil   // (ADV-003)
         Task { await stt.cancel() }
         machine.handle(.reset)
         phase = machine.phase
