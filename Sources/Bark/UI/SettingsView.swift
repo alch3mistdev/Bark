@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import BarkCore
 import BarkEngines
 
@@ -7,13 +8,14 @@ struct SettingsView: View {
     @State private var pane: Pane = .general
 
     enum Pane: String, CaseIterable, Identifiable {
-        case general, hotkey, modes, history, permissions, privacy
+        case general, hotkey, modes, apps, history, permissions, privacy
         var id: String { rawValue }
         var icon: String {
             switch self {
             case .general: "gearshape"
             case .hotkey: "keyboard"
             case .modes: "slider.horizontal.3"
+            case .apps: "app.badge"
             case .history: "clock"
             case .permissions: "lock.shield"
             case .privacy: "hand.raised"
@@ -24,6 +26,7 @@ struct SettingsView: View {
             case .general: "General"
             case .hotkey: "Hotkey"
             case .modes: "Modes"
+            case .apps: "Per-app modes"
             case .history: "History"
             case .permissions: "Permissions"
             case .privacy: "Privacy"
@@ -58,6 +61,7 @@ struct SettingsView: View {
                 case .general: GeneralPane(controller: controller)
                 case .hotkey: HotkeyPane(controller: controller)
                 case .modes: ModesPane(controller: controller)
+                case .apps: AppModesPane(controller: controller)
                 case .history: HistoryPane(controller: controller)
                 case .permissions: PermissionsPane(controller: controller)
                 case .privacy: PrivacyPane()
@@ -77,6 +81,63 @@ private let supportedLocales: [(String, String)] = [
     ("fr-FR", "French"), ("de-DE", "German"), ("it-IT", "Italian"),
     ("pt-BR", "Portuguese (BR)"), ("ja-JP", "Japanese"), ("zh-CN", "Chinese"), ("ko-KR", "Korean"),
 ]
+
+private struct AppModesPane: View {
+    @Bindable var controller: DictationController
+    @State private var newBundleID = ""
+    @State private var newModeID = Mode.clean.id
+
+    private var runningApps: [(name: String, bundleID: String)] {
+        NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .compactMap { app in app.bundleIdentifier.map { (app.localizedName ?? $0, $0) } }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func appName(_ bundleID: String) -> String {
+        runningApps.first { $0.bundleID == bundleID }?.name ?? bundleID
+    }
+
+    var body: some View {
+        Form {
+            Section("Auto-select mode by app") {
+                let entries = controller.appModeMap.sorted { $0.key < $1.key }
+                if entries.isEmpty {
+                    Text("No app mappings yet. Add one below.").foregroundStyle(.secondary)
+                }
+                ForEach(entries, id: \.key) { bundleID, modeID in
+                    HStack {
+                        Text(appName(bundleID)).frame(maxWidth: .infinity, alignment: .leading)
+                        Text(controller.modes.first { $0.id == modeID }?.name ?? modeID)
+                            .foregroundStyle(.secondary)
+                        Button(role: .destructive) {
+                            controller.setAppMode(bundleID: bundleID, modeID: nil)
+                        } label: { Image(systemName: "trash") }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
+            Section("Add mapping") {
+                Picker("App", selection: $newBundleID) {
+                    Text("Choose…").tag("")
+                    ForEach(runningApps, id: \.bundleID) { Text($0.name).tag($0.bundleID) }
+                }
+                Picker("Mode", selection: $newModeID) {
+                    ForEach(controller.modes) { Text($0.name).tag($0.id) }
+                }
+                Button("Add mapping") {
+                    controller.setAppMode(bundleID: newBundleID, modeID: newModeID)
+                    newBundleID = ""
+                }
+                .disabled(newBundleID.isEmpty)
+                Text("When you dictate into a mapped app, that mode is used automatically; other apps use "
+                     + "your manual selection.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
 
 private struct LLMStatusBadge: View {
     let status: LLMStatus

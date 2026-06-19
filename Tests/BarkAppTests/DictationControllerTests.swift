@@ -47,6 +47,16 @@ final class DictationControllerTests: XCTestCase {
         }
     }
 
+    func testPerAppModeOverridesManualSelection() async {
+        // Manual mode = clean (capitalises); per-app map sends the test target → raw (lossless).
+        let injector = FakeInjector()
+        let c = make(stt: FakeSTTEngine(finalText: "hello world"), injector: injector, mode: "clean")
+        c.setAppMode(bundleID: "com.example.TextEdit", modeID: "raw")  // == make()'s targetProvider bundleID
+        await dictate(c)
+        XCTAssertEqual(injector.last, "hello world")  // raw applied, not "Hello world"
+        XCTAssertEqual(c.phase, .idle)
+    }
+
     func testRawHappyPathInjectsCleanedText() async {
         let injector = FakeInjector()
         let c = make(stt: FakeSTTEngine(finalText: "hello world"), injector: injector, mode: "clean")

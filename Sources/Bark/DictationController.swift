@@ -103,6 +103,23 @@ public final class DictationController {
 
     public var currentMode: Mode { modes.first { $0.id == selectedModeID } ?? .clean }
 
+    /// Mode for the current dictation: per-app mapping (resolved from the
+    /// start-time target) if present, else the manual selection.
+    private func effectiveMode() -> Mode {
+        let id = AppModeResolver.modeID(forBundleID: capturedTarget?.bundleID,
+                                        map: settings.settings.appModeMap,
+                                        availableModeIDs: Set(modes.map(\.id)),
+                                        fallback: selectedModeID)
+        return modes.first { $0.id == id } ?? .clean
+    }
+
+    public var appModeMap: [String: String] { settings.settings.appModeMap }
+
+    public func setAppMode(bundleID: String, modeID: String?) {
+        guard !bundleID.isEmpty else { return }
+        settings.update { $0.appModeMap[bundleID] = modeID }
+    }
+
     public var hotkeySetting: HotkeySetting {
         get { settings.settings.hotkey }
         set {
@@ -396,7 +413,7 @@ public final class DictationController {
             return
         }
 
-        let mode = currentMode
+        let mode = effectiveMode()
         let cleaned = await produceText(transcript, mode: mode)
         await inject(cleaned, transcript: transcript, mode: mode)
     }
@@ -654,7 +671,7 @@ public final class DictationController {
                 if transcript.isEmpty {
                     machine.handle(.reset); phase = machine.phase
                 } else {
-                    let mode = currentMode
+                    let mode = effectiveMode()
                     machine.handle(.transcriptFinalized); phase = machine.phase
                     let cleaned = await produceText(transcript, mode: mode)
                     // Toggled off (or cancelled) during cleanup → do NOT inject (Codex).

@@ -45,6 +45,7 @@ public struct HotkeySetting: Codable, Sendable, Equatable {
 public struct Settings: Codable, Sendable, Equatable {
     public var selectedModeID: String
     public var customModes: [Mode]
+    public var appModeMap: [String: String]   // focused-app bundleID → modeID
     public var localeID: String
     public var hotkey: HotkeySetting
     public var handsFreeHotkey: HotkeySetting
@@ -59,6 +60,7 @@ public struct Settings: Codable, Sendable, Equatable {
     public init(
         selectedModeID: String = Mode.clean.id,
         customModes: [Mode] = [],
+        appModeMap: [String: String] = [:],
         localeID: String = "en-US",
         hotkey: HotkeySetting = .default,
         handsFreeHotkey: HotkeySetting = HotkeySetting(kind: .keyToggle, keyCode: 96, modifierFlags: 0),
@@ -72,6 +74,7 @@ public struct Settings: Codable, Sendable, Equatable {
     ) {
         self.selectedModeID = selectedModeID
         self.customModes = customModes
+        self.appModeMap = appModeMap
         self.localeID = localeID
         self.hotkey = hotkey
         self.handsFreeHotkey = handsFreeHotkey
@@ -92,6 +95,7 @@ public struct Settings: Codable, Sendable, Equatable {
         let d = Settings.default
         selectedModeID = try c.decodeIfPresent(String.self, forKey: .selectedModeID) ?? d.selectedModeID
         customModes = try c.decodeIfPresent([Mode].self, forKey: .customModes) ?? d.customModes
+        appModeMap = try c.decodeIfPresent([String: String].self, forKey: .appModeMap) ?? d.appModeMap
         localeID = try c.decodeIfPresent(String.self, forKey: .localeID) ?? d.localeID
         hotkey = try c.decodeIfPresent(HotkeySetting.self, forKey: .hotkey) ?? d.hotkey
         handsFreeHotkey = try c.decodeIfPresent(HotkeySetting.self, forKey: .handsFreeHotkey) ?? d.handsFreeHotkey
