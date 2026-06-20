@@ -42,7 +42,7 @@ touching the pipeline. See `docs/ADRs.md`.
 
 ```bash
 swift build            # fully offline, no external dependencies
-swift test             # 102 tests (core logic + controller orchestration + history crypto + STT backends + model inspector)
+swift test             # 172 tests (core logic + controller orchestration + history crypto + STT backends + model inspector)
 
 # Build a draggable installer (ad-hoc signed for personal use):
 scripts/make-dmg.sh
@@ -66,6 +66,13 @@ On first launch macOS will ask for three permissions (each requested just-in-tim
   custom key are supported in `HotkeyConfig`.)
 - Pick a **Mode** from the menu bar: `Raw` · `Clean` · `Email` · `Message` · `Code / Commit` · `List`.
 - `Raw`/`Clean` are instant. The LLM modes rewrite and insert once (sub-second to ~1.5 s).
+- **Per-app auto-mode** — map apps to modes in **Settings ▸ Per-app modes** (e.g. Terminal→Raw,
+  Mail→Email). When you dictate into a mapped app, that mode is used automatically; everything else
+  uses your manual selection.
+- **Copy to clipboard instead of typing** — **Settings ▸ General ▸ Output ▸ "When dictation ends"**.
+  Pick *Copy to clipboard* for apps where synthetic paste/keystrokes are unreliable; paste with ⌘V.
+- **Re-use a past dictation** (needs history on) — the menu bar's **Re-insert recent** types a saved
+  result into the app you're in; **Settings ▸ History** has a search box + per-row **Copy**.
 
 ## Enable on-device LLM rewrite (MLX)
 
@@ -79,6 +86,29 @@ swift build -c release                 # first build compiles MLX/Metal — take
 
 The model (~2.5–3 GB) downloads from Hugging Face on first use, then runs fully offline. Revert with
 `git checkout Package.swift`. (Both manifests are verified to build.)
+
+## Alternative STT backends (optional)
+
+The default speech engine is **Apple SpeechAnalyzer** (on-device, macOS 26, no download). Two optional
+backends drop in behind the same `STTEngine` — **WhisperKit (Argmax)** and **Parakeet (FluidAudio)** —
+for broader language coverage. They are **opt-in at build time** so the lean build stays dependency-free
+and fully offline:
+
+```bash
+cp Package-stt-extras.swift Package.swift   # adds WhisperKit + FluidAudio; sets WHISPERKIT / FLUIDAUDIO flags
+swift build -c release
+git checkout Package.swift                   # revert to the lean, dependency-free default
+```
+
+Without those flags the engines compile to thin stubs, so a stale setting can never brick the app —
+the factory falls back to Apple and logs a warning.
+
+- **Pick an engine** — **Settings ▸ General ▸ Speech ▸ Engine**. Only backends compiled into the
+  running build are offered.
+- **Model cache** — **Settings ▸ Models**: lists cached bundles in
+  `~/Library/Application Support/Bark/models/`, with **Re-verify** (re-checks each bundle's SHA-256)
+  and **Reveal in Finder**. Model downloads are **SHA-256-verified** against a bundled manifest before
+  they enter the cache; a mismatch deletes the file and never caches it (SEC-003).
 
 ## Privacy & security
 
@@ -110,15 +140,21 @@ and the **honest limitations** of each control. Highlights, enforced in code:
 Bark (SwiftUI MenuBarExtra)
  ├─ DictationController ........ orchestrates the pipeline (state machine)
  ├─ BarkEngines ................ OS adapters
- │   ├─ SpeechAnalyzerEngine ... Apple on-device STT (macOS 26)
+ │   ├─ SpeechAnalyzerEngine ... Apple on-device STT (macOS 26)  [default]
+ │   ├─ WhisperKit/ParakeetEngine  optional STT backends (build flags) + STTEngineFactory
+ │   ├─ ModelDownloader/Store/Inspector  SHA-256-verified model cache
  │   ├─ AudioCaptureEngine ..... AVAudioEngine → 16 kHz mono → lock-free ring buffer
  │   ├─ HotkeyManager .......... global CGEventTap (push-to-talk / toggle)
  │   ├─ PasteboardInjector ..... ⌘V with clipboard snapshot/restore (+ KeystrokeInjector fallback)
+ │   ├─ ClipboardInjector ...... copy-to-clipboard output routing (secure-field-guarded)
+ │   ├─ FocusProbe ............. frontmost target + best-effort caret rect (HUD anchor)
  │   └─ PermissionsCoordinator . mic / Accessibility / Input Monitoring TCC
  ├─ BarkCleanupMLX ............. optional Qwen3-4B rewrite (MLX) — stubbed out by default
  └─ BarkCore ................... pure, dependency-free, fully unit-tested
      ├─ AudioRingBuffer (SPSC)  ├─ TextSanitizer       ├─ BasicTextCleaner
      ├─ Mode / ModeRegistry     ├─ PromptTemplate      ├─ SecureFieldPolicy
+     ├─ AppModeResolver         ├─ InjectionRouter / OutputRouting
+     ├─ HistoryQuery            ├─ LevelMeter / HUDPlacement
      ├─ InjectionPlan / FocusGuard / TerminalDetector  └─ DictationStateMachine
 ```
 
@@ -127,7 +163,16 @@ Bark (SwiftUI MenuBarExtra)
 - **Settings open from the menu bar** (a real AppKit window — the SwiftUI `Settings` scene is
   unreliable in a menu-bar app, so Bark hosts its own and brings it to the front).
 - **Live recording HUD** — a floating, non-activating overlay shows state + the partial transcript
-  while you dictate (never steals focus from the app you're typing into).
+  while you dictate (never steals focus from the app you're typing into). An opt-in **Enhanced
+  recording overlay** (Settings → General → Feedback) adds larger live text, a **mic-level meter**,
+  and best-effort anchoring near the text cursor; the default compact strip is unchanged.
+- **Per-app auto-mode** — Settings → Per-app modes: map a bundle ID to a rewrite mode; the focused
+  app at dictation start picks the mode, falling back to your manual selection.
+- **Output routing** — Settings → General → Output: insert into the app (default) or **copy to
+  clipboard only** for apps where injection is unreliable. Clipboard copies still refuse secure fields.
+- **History search + re-insert** — Settings → History: search past dictations (case/accent-insensitive)
+  and **Copy** any row; the menu bar's **Re-insert recent** types a saved result back into the focused
+  app (focus-snapshotted, serialized, secure-field-guarded).
 - **Settings persist** (UserDefaults): selected mode, language, hotkey, custom modes, toggles.
 - **Launch at login** (`SMAppService`) — toggle in Settings → General.
 - **Configurable hotkey** — Settings → Hotkey: **Hold fn** (push-to-talk) or record a **function key**
@@ -144,10 +189,14 @@ Bark (SwiftUI MenuBarExtra)
 
 ## Status
 
-**Built & verified** (`swift build` clean + **102 passing tests**): the full record → STT → cleanup →
+**Built & verified** (`swift build` clean + **172 passing tests**): the full record → STT → cleanup →
 inject pipeline, global hotkey (push-to-talk + consumed toggle), all six modes + custom modes,
 deterministic cleaner, settings persistence, launch-at-login, encrypted opt-in history, onboarding,
-and `.app`/DMG packaging. The MLX LLM engine is verified to compile/link via `Package-mlx.swift`.
+and `.app`/DMG packaging. Shipped workflow features: **per-app auto-mode**, **output routing**
+(copy-to-clipboard), **history search + re-insert**, an opt-in **enhanced overlay with mic-level
+meter**, and **pluggable STT backends** (Apple default; WhisperKit/Parakeet opt-in) with a
+SHA-256-verified model cache + Models pane. The MLX LLM engine is verified to compile/link via
+`Package-mlx.swift`.
 
 What the tests cover: pure decision logic (sanitizer, secure-field policy, terminal detection,
 focus-guard, ring buffer, modes/prompt templates, state machine, settings codec, retention) **and**
@@ -158,8 +207,13 @@ wrong-key, and no-clobber behavior (`BarkAppTests`).
 **Designed, wired via protocols, not yet implemented**: the Developer-ID notarization pipeline
 (`scripts/make-app.sh` documents the `notarytool` steps). The WhisperKit and Parakeet STT adapters
 are wired (`Sources/BarkEngines/STT/{WhisperKitEngine,ParakeetEngine}.swift`) and gated behind
-`Package-stt-extras.swift`; see ADR-006. The model-manager UI for inspecting the SHA-256-verified
-cache lives at Settings ▸ Models.
+`Package-stt-extras.swift` — the engines themselves are still thin until the real transcription paths
+are filled in, but the factory, settings, SHA-256-verified downloader, and **Models pane** (Settings ▸
+Models: inspect / re-verify / reveal the cache) are built and tested; see ADR-006.
+
+**Specs only (not yet built)**: `specs/009-voice-driven-revision` (revise the last injection by voice)
+and `specs/010-inline-code-dictation` (file-aware code comments + commit messages) — spec/plan/ADRs
+merged for review; no implementation yet.
 
 > Note: live end-to-end behavior (mic → paste) and the SMAppService login item require running the
 > installed `.app` and granting TCC permissions interactively — they can't be exercised in a headless
