@@ -65,3 +65,27 @@ download path. Settings UI hides uncompiled backends. Stale settings from a futu
 never brick the app — the factory falls back to `SpeechAnalyzerEngine()` and logs a warning.
 See `docs/ADR-006-stt-engine-selection.md` for the full record (alternatives, verification).
 
+## ADR-007 — Voice-driven revision of the last injection
+**Decision.** Add a second hotkey (`revisionHotkey`, default `⌥⌘R`) that revises the text Bark
+just injected into the focused field. The revision pipeline sits behind a new `RevisionEngine`
+protocol with two implementations: a `DeterministicRevisionEngine` in `BarkCore` (hard-coded
+dictionary: *delete that*, *undo*, *select all*, *copy*, *scratch that* — works in the lean build,
+no LLM) and an `LLMRevisionEngine` in `BarkCleanupMLX` gated by `MLXCleanup` (free-form revisions
+via the existing `MLXTextCleaner`). `HistoryRecord` gains an optional `parentID: UUID?` for
+revision linkage; `Mode` gains an optional `revisionPrompt` with a per-mode default table.
+Revisions re-run every existing security control (`SecureFieldPolicy`, `FocusGuard`,
+`TextSanitizer`) and `OutputValidator` gains a new length-drift rule (revised text must be ≤ 2×
+previous length) to catch prompt-injection expansion. The spoken instruction is fenced as
+`<revision>` in `PromptTemplate.revisionSystem` (mirrors SEC-010).
+**Why.** Every dictation app competes on the speech→text leg; nobody operates on already-injected
+text via voice. This is the #1-ranked gap from the 2026-06-19 competitive analysis and the single
+highest-leverage move in the category: it transforms Bark from "dictation app" into "voice-controlled
+text editor." The deterministic dictionary ensures the feature ships in every build, not just the
+MLX build, so the lean build gets value without a model download.
+**Consequence.** Lean build gains the dictionary path (no new deps, no new network). MLX build adds
+the LLM path. `Settings` grows by `revisionHotkey` and `revisionEnabled` (default on). STRIDE in
+`docs/SECURITY.md` gains a "Revision surface" section. ~18 new tests. Honest residual risks: AX
+automation brittleness in Electron apps; spoken instruction as a prompt-injection vector (mitigated
+by the length-drift rule + prompt fence). See `docs/ADR-007-revision-surface.md` for the full
+record (alternatives, verification) and `specs/009-voice-driven-revision/` for the spec, plan, and
+tasks.
