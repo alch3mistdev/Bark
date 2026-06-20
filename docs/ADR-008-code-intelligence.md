@@ -1,6 +1,6 @@
 # ADR-008 — Inline code comment + commit-message dictation
 
-**Status:** Accepted (subject to spec review — see `specs/010-inline-code-dictation/spec.md`)
+**Status:** Proposed (pending spec review — see `specs/010-inline-code-dictation/spec.md`)
 **Date:** 2026-06-19
 **Context:** `specs/010-inline-code-dictation/spec.md`
 

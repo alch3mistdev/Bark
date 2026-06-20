@@ -65,7 +65,8 @@ identifiers (function names, class names, variable names, enum cases, constants)
 the file's text. The LLM is instructed (via `PromptTemplate.code`) to use these identifiers
 verbatim when the dictated prose references them.
 
-- Swift files: the symbol index is built via `SwiftSyntax` (system framework, on the OS).
+- Swift files (MLX build): the symbol index is built via `SwiftSyntax` (a SwiftPM dependency in
+  the MLX package graph).
 - Other languages: a regex-based extractor (top-level `func`, `class`, `var`, `let`, `def`,
   `const`, `enum`, etc., depending on language).
 - Index size capped (default: 500 identifiers) to keep the prompt bounded.
@@ -101,8 +102,8 @@ mode generates a Conventional Commits message:
 
 - Subject line: `<type>(<scope>): <summary>` where `<type>` is one of
   `feat | fix | docs | style | refactor | perf | test | build | ci | chore | revert` and
-  `<scope>` is the primary symbol changed (best-guess from the staged diff if available,
-  else from the focused file).
+  `<scope>` is the primary symbol changed (best-guess from the focused file / focused context
+  heuristics only).
 - Body: a wrapped paragraph(s) separated from the subject by a blank line, ≤ 72 chars per line.
 - Optional footer: `BREAKING CHANGE: <note>` if the user dictated "this breaks" / "breaking
   change" / etc.

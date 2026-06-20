@@ -34,8 +34,8 @@ Identifier preservation and Conventional Commits formatting require the MLX buil
 ```bash
 cp Package-mlx.swift Package.swift
 # Optional: enable the SwiftSyntax-backed Swift identifier extractor.
-# (SwiftSyntax is on the system — no Package.swift change required; the build
-# flag CODE_INTELLIGENCE is defined in a future #if.)
+# (Ensure SwiftSyntax is available in the MLX SwiftPM dependency graph; the
+# build flag CODE_INTELLIGENCE is defined in a future #if.)
 swift build -c release
 ```
 
@@ -143,10 +143,8 @@ swift build -c release
 6. Toggle "Preserve identifiers" off. Dictate a comment that mentions `viewDidLoad`. Expect
    the identifier to be lost (rewritten as prose).
 7. First-time consent: revoke "Always allow" in Settings ▸ Code ▸ File-read consent.
-   Dictate again. Expect the consent dialog to re-appear (the next time the user
-   encounters the same app+language after a revoke, the prompt is re-shown — actually,
-   per spec, the consent is per-app-per-language and is not re-shown after a "Never";
-   the dialog is shown only on the first encounter of a new combination).
+   Dictate again. Expect the consent dialog to re-appear for that same app+language
+   combination because the prior consent entry was reset.
 
 ## Related
 

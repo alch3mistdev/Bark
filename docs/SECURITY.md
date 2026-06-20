@@ -35,22 +35,22 @@ code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the nex
 - ☑ Fresh stateless session per rewrite — no conversation state bleeds across dictations.
 
 ## Revision surface  (`Sources/Bark/Revision/*`, ADR-007, `specs/009-voice-driven-revision/`)
-- ☑ Refuses when `IsSecureEventInputEnabled()` or `AXSecureTextField` is focused
+- ☐ Refuses when `IsSecureEventInputEnabled()` or `AXSecureTextField` is focused
   (`SecureFieldPolicy`). (SEC-002 re-applied)
-- ☑ Re-verifies the focused app's PID immediately before applying the rewrite (`FocusGuard`); aborts
+- ☐ Re-verifies the focused app's PID immediately before applying the rewrite (`FocusGuard`); aborts
   on mismatch. (SEC-004 re-applied)
-- ☑ Output passes `TextSanitizer` (C0/C1, ANSI escapes, bidi strip) before insertion. (SEC-011 re-applied)
-- ☑ Spoken revision instruction is fenced as **untrusted data** inside `<revision>` in
+- ☐ Output passes `TextSanitizer` (C0/C1, ANSI escapes, bidi strip) before insertion. (SEC-011 re-applied)
+- ☐ Spoken revision instruction is fenced as **untrusted data** inside `<revision>` in
   `PromptTemplate.revisionSystem`; the previous text is fenced inside `<previous>`. Mirrors
   SEC-010 with the new revision surface.
-- ☑ `OutputValidator` gains a **length-drift rule**: revised text must be ≤ 2× the previous text's
+- ☐ `OutputValidator` gains a **length-drift rule**: revised text must be ≤ 2× the previous text's
   length. Catches the "expand to include a phishing URL or external payload" prompt-injection
   pattern even if all other fences fail.
-- ☑ Dictionary commands (`delete that`, `undo`, `select all`, `copy`, `scratch that`) are pure
+- ☐ Dictionary commands (`delete that`, `undo`, `select all`, `copy`, `scratch that`) are pure
   AX actions; they never write to the focused field's text content. They emit a ⌘Z / ⌘A / ⌘C
   event only when the focused app accepts those shortcuts; if the app rejects them, Bark falls
   back to a clear refusal (no error, no destruction).
-- ☑ History linkage: every revision produces a `HistoryRecord` with `parentID` set; the user can
+- ☐ History linkage: every revision produces a `HistoryRecord` with `parentID` set; the user can
   revert the chain via Settings ▸ History. Revisions that fail validation preserve the
   original text (no destruction). (SEC-013)
 - **Residual (L-7 — Electron / web text fields):** AX range manipulation for "select-all + replace"
@@ -126,24 +126,24 @@ documented rather than hidden:
   `NSEvent.addGlobalMonitorForEvents` and warn more precisely.
 
 ## File read for code intelligence  (`Sources/BarkCore/Code/*`, ADR-008, `specs/010-inline-code-dictation/`)
-- ☑ First-time **per-app-per-language consent dialog** is shown before reading the focused file
+- ☐ First-time **per-app-per-language consent dialog** is shown before reading the focused file
   for the first time in a given app+language combination. The dialog names the app by name +
   bundle ID and the language by extension + display name. Three options: "Always allow"
   (persists for that app+language), "Allow once" (transient, not persisted), "Never"
   (blocklist; the symbol index is silently skipped for that app+language). The consent list
   is in `Settings.codeIntelligence.fileReadConsents`, key = `"\(bundleID)/\(language)"`.
-- ☑ **1 MB cap.** Files larger than 1 MB skip the symbol index and degrade to prefix-only
+- ☐ **1 MB cap.** Files larger than 1 MB skip the symbol index and degrade to prefix-only
   formatting. The cap is enforced in the file-read coordinator; the user is informed via a
   one-time log message ("Skipping symbol index for <path>: <reason>").
-- ☑ **Binary / unreadable files are skipped** with the same log message. The user is not
+- ☐ **Binary / unreadable files are skipped** with the same log message. The user is not
   prompted for consent; the index is silently skipped.
-- ☑ **No new network events.** The file read is local. The symbol index is local. The LLM
+- ☐ **No new network events.** The file read is local. The symbol index is local. The LLM
   rewrite uses the existing on-device `MLXTextCleaner` path.
-- ☑ **Symbol index is bounded** (default 500 entries, deterministic truncation in source order).
+- ☐ **Symbol index is bounded** (default 500 entries, deterministic truncation in source order).
   The LLM is told the index is partial if the file has more identifiers.
-- ☑ **Lean build does not read the file.** Without `CODE_INTELLIGENCE` defined, the symbol
+- ☐ **Lean build does not read the file.** Without `CODE_INTELLIGENCE` defined, the symbol
   index is unavailable; comment formatting uses prefix only. This is a privacy-friendly default.
-- ☑ **The user can revoke consent at any time** via Settings ▸ Code ▸ File-read consent (lists
+- ☐ **The user can revoke consent at any time** via Settings ▸ Code ▸ File-read consent (lists
   all app+language entries with Allow / Never / Reset controls).
 - **Residual (L-10 — SwiftSyntax reads file content):** the SwiftSyntax-backed identifier
   extractor for Swift files sees the file's content. The user has explicitly opted in via the

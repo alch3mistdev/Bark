@@ -16,9 +16,9 @@ prefix-only / no-op.
 **Language/Version**: Swift 6.0 (toolchain 6.3.2), SwiftUI / AppKit
 **Primary Dependencies**:
 - **Lean build**: none added. Regex-based language detection and comment-prefix table in `BarkCore`.
-- **MLX build** (only): `SwiftSyntax` for the Swift symbol extractor. The framework is on the
-  system (no `Package.swift` change required) — the new flag `#if CODE_INTELLIGENCE` enables
-  the SwiftSyntax-backed path; `#else` falls back to regex.
+- **MLX build** (only): `SwiftSyntax` for the Swift symbol extractor. This must be present in the
+  MLX SwiftPM dependency graph; the new flag `#if CODE_INTELLIGENCE` enables the
+  SwiftSyntax-backed path; `#else` falls back to regex.
 
 **Storage**:
 - `Settings.codeIntelligence: CodeIntelligenceSettings` — master toggle + per-language toggles +
@@ -248,13 +248,9 @@ docs/ADRs.md                                                (extend — ADR-008)
   per-app language detection is heuristic. If the heuristic gives a wrong app+language, the
   user may accidentally grant consent for a different combination. Mitigated by showing the
   app by name + bundle ID, and the language by extension + display name.
-- **The "Allow once" default.** The first time the user encounters an app+language, the
-  default is "Allow once" — the dialog is shown. If the user closes the dialog (Esc / X), the
-  default kicks in and the file IS read once. This is the *least* surprising default but it
-  means a user who doesn't engage with the dialog will still have their file read once. The
-  path forward: make the default "Never" with a one-line explainer, and require explicit
-  choice. v1 ships with "Allow once" as the default; can be flipped to "Never" if the
-  adversarial review flags it. Documented.
+- **Dismiss / timeout handling for consent.** If the user closes the consent dialog (Esc / X) or
+  the prompt times out, Bark does **not** read the file and degrades gracefully to prefix-only.
+  This keeps the file-read expansion explicitly opt-in.
 - **Identifier hallucination.** The LLM may invent identifiers. Mitigated by the symbol
   index as context + an `OutputValidator` rule that flags non-existent identifiers (best-effort;
   false positives on imported types).

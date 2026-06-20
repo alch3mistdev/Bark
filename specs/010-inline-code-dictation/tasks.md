@@ -54,14 +54,14 @@
       explainer. Shows the app by name + bundle ID; the language by extension + display name.
 - [ ] T041 [Bark] `FileReadConsentCoordinator` actor — wraps the consent lookup / decision /
       prompt flow. Composed in `CompositionRoot`. Exposes `requestConsent(for: app, language:)
-      async -> FileReadConsentDecision` (with a 60 s timeout; on timeout, default to
-      `.allowOnce` and proceed).
+      async -> FileReadConsentDecision` (with a 60 s timeout; on timeout/dismiss, skip file read
+      and degrade gracefully to prefix-only).
 - [ ] T042 [Bark/UI] `CodePane` in `SettingsView` — master toggle, per-language toggles, link
       to the file-read consent sheet.
 - [ ] T043 [Bark/UI] `FileReadConsentSettingsView` — lists all `app/language` entries from
       `Settings.codeIntelligence.fileReadConsents` with Allow / Never / Reset controls.
 - [ ] T044 [BarkAppTests] Tests for consent lookup: prior consent returns immediately; first
-      encounter returns `.pending`; "Never" entries are blocklisted.
+      encounter prompts and returns an explicit decision; "Never" entries are blocklisted.
 
 ## Phase 6 — US2: identifier preservation (MLX build)
 
