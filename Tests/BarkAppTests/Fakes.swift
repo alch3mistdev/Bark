@@ -145,6 +145,42 @@ final class FakePreparingCleaner: TextCleaner, @unchecked Sendable {
     }
 }
 
+/// Returns a canned context (or nil), and counts how many times it was read so
+/// tests can assert that nothing is read when Smart Replies is off.
+final class FakeContextProvider: ContextProvider, @unchecked Sendable {
+    let context: ConversationContext?
+    private(set) var reads = 0
+
+    init(_ context: ConversationContext?) { self.context = context }
+
+    func currentContext() async -> ConversationContext? {
+        reads += 1
+        return context
+    }
+}
+
+/// Reply suggester that returns canned options, fails, or reports unavailable.
+final class FakeBranchSuggester: BranchSuggester, @unchecked Sendable {
+    enum Behavior { case ok([BranchOption]), empty, fail }
+    let behavior: Behavior
+    let available: Bool
+
+    init(_ behavior: Behavior, available: Bool = true) {
+        self.behavior = behavior
+        self.available = available
+    }
+
+    var isAvailable: Bool { get async { available } }
+
+    func suggest(for context: ConversationContext, maxOptions: Int) async throws -> [BranchOption] {
+        switch behavior {
+        case .ok(let opts): return opts
+        case .empty: return []
+        case .fail: throw CleanupError.modelUnavailable
+        }
+    }
+}
+
 /// Injector that records text, or fails a configurable number of times.
 final class FakeInjector: TextInjector, @unchecked Sendable {
     enum FailMode { case none, secure, focusChanged }

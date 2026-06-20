@@ -197,6 +197,19 @@ private struct GeneralPane: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            Section("Smart Replies") {
+                Toggle("Suggest replies from the focused app", isOn: $controller.smartRepliesEnabled)
+                Text("Off by default. When on, opening the Bark menu reads the latest message in the "
+                     + "app you're using (on-device, via Accessibility) and offers tappable replies. "
+                     + "Picking one types it in — Bark never presses Return. AI suggestions also "
+                     + "require the LLM above; otherwise you get instant quick replies.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if controller.smartRepliesEnabled && !controller.branchSuggesterPresent {
+                    Text("This build ships without the on-device LLM, so Smart Replies offers "
+                         + "deterministic quick replies (Yes/No and common follow-ups) only.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Section("Output") {
                 Picker("When dictation ends", selection: $controller.outputRouting) {
                     ForEach(OutputRouting.allCases) { Text($0.label).tag($0) }
@@ -472,6 +485,8 @@ private struct PrivacyPane: View {
                 Label("Never presses Return (won't run terminal commands)", systemImage: "terminal")
                 Label("Restores your clipboard after pasting", systemImage: "doc.on.clipboard")
                 Label("History is off by default, encrypted when on", systemImage: "lock.doc")
+                Label("Smart Replies reads the focused app on-device, only when enabled",
+                      systemImage: "bubble.left.and.bubble.right")
             }
         }
         .formStyle(.grouped)

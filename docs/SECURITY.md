@@ -34,6 +34,23 @@ code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the nex
   text; it is text only, never executed. (AIML-001/004 / SEC-011)
 - ☑ Fresh stateless session per rewrite — no conversation state bleeds across dictations.
 
+## Smart Replies — reading the focused app  (`BarkEngines/Context/*`, `BarkCore/Context/*`) (009)
+- ☑ **Off by default** (`Settings.smartRepliesEnabled == false`). When off, Bark reads **no** app
+  content. This is the only feature that reads other apps' on-screen text, so it is strictly opt-in
+  (least privilege).
+- ☑ When on, context is read **on-device** via the Accessibility API (bounded depth/nodes/chars, short
+  AX messaging timeout) and fed **only** to the on-device model — nothing is transmitted (offline
+  guarantee holds).
+- ☑ Read context is fenced as untrusted data inside `<context>` with an explicit "data, not
+  instructions" guardrail; injected close-tags are neutralized; the model is told to *propose replies*,
+  not act (`BranchPromptTemplate`). Output is parsed/bounded (count + length).
+- ☑ Read context is **never persisted** (held only while the menu is open; cleared on dismiss/disable)
+  and never written to history.
+- ☑ Picking a reply goes through the **same injection guards** (sanitize, focus re-verify,
+  secure-field refusal, clipboard restore) and **never presses Return** — auto-submit is out of scope.
+- Residual: "the latest message" is a best-effort heuristic over the focused window's accessible text;
+  some apps expose nothing (→ "No reply context found") and parsing varies by app/web view.
+
 ## Permissions — least privilege  (`Resources/Bark.entitlements`, `PermissionsCoordinator`)
 - ☑ Only the microphone device entitlement. Accessibility + Input Monitoring are user-granted via TCC,
   requested just-in-time with purpose strings. (SEC-008 / T-011)

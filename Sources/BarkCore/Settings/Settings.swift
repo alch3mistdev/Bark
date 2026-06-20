@@ -57,6 +57,7 @@ public struct Settings: Codable, Sendable, Equatable {
     public var outputRouting: OutputRouting
     public var soundFeedback: Bool
     public var enhancedHUD: Bool
+    public var smartRepliesEnabled: Bool   // opt-in: lets Bark read the focused app's text for reply options (009)
     public var hasCompletedOnboarding: Bool
 
     public init(
@@ -74,6 +75,7 @@ public struct Settings: Codable, Sendable, Equatable {
         outputRouting: OutputRouting = .insert,
         soundFeedback: Bool = true,
         enhancedHUD: Bool = false,
+        smartRepliesEnabled: Bool = false,   // off by default: reading other apps' text is a privacy expansion (009)
         hasCompletedOnboarding: Bool = false
     ) {
         self.selectedModeID = selectedModeID
@@ -90,6 +92,7 @@ public struct Settings: Codable, Sendable, Equatable {
         self.outputRouting = outputRouting
         self.soundFeedback = soundFeedback
         self.enhancedHUD = enhancedHUD
+        self.smartRepliesEnabled = smartRepliesEnabled
         self.hasCompletedOnboarding = hasCompletedOnboarding
     }
 
@@ -113,6 +116,7 @@ public struct Settings: Codable, Sendable, Equatable {
         outputRouting = try c.decodeIfPresent(OutputRouting.self, forKey: .outputRouting) ?? d.outputRouting
         soundFeedback = try c.decodeIfPresent(Bool.self, forKey: .soundFeedback) ?? d.soundFeedback
         enhancedHUD = try c.decodeIfPresent(Bool.self, forKey: .enhancedHUD) ?? d.enhancedHUD
+        smartRepliesEnabled = try c.decodeIfPresent(Bool.self, forKey: .smartRepliesEnabled) ?? d.smartRepliesEnabled
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? d.hasCompletedOnboarding
     }
 

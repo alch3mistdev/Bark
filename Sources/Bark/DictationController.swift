@@ -31,6 +31,12 @@ public final class DictationController {
     public private(set) var isReinserting = false   // serializes one-click re-insert (Codex)
     public private(set) var inputLevel: Float = 0    // 0...1 smoothed mic level for the HUD meter
 
+    // Smart Replies (009): context-aware reply options for mid-session prompts.
+    public private(set) var branchOptions: [BranchOption] = []
+    public private(set) var branchSuggesting = false    // LLM suggestion in flight
+    public private(set) var branchUsedLLM = false        // current options came from the model
+    public private(set) var branchNotice: String?        // non-fatal status (no context / fallback)
+
     /// Side-channel callbacks wired by the app layer (AppKit windows/HUD).
     public var onPhaseChange: (@MainActor (DictationPhase) -> Void)?
     public var onOpenSettings: (@MainActor () -> Void)?
@@ -49,6 +55,8 @@ public final class DictationController {
     private let keystrokeInjector: TextInjector
     private let clipboardInjector: TextInjector
     private let history: HistoryStore?
+    private let branchSuggester: BranchSuggester?
+    private let contextProvider: ContextProvider?
     private let cleanupDeadline: Double
     private let targetProvider: @MainActor () -> InjectionTarget?
 
@@ -64,6 +72,7 @@ public final class DictationController {
     private var llmTask: Task<Void, Never>?
     private var handsFreeTask: Task<Void, Never>?
     private var handsFreeAudio: AudioCapturing?
+    private var branchContext: ConversationContext?   // context read for the open menu; never persisted
 
     public init(
         settings: SettingsStore,
@@ -73,6 +82,8 @@ public final class DictationController {
         handsFreeHotkey: HotkeyManager = HotkeyManager(),
         llmCleaner: TextCleaner?,
         history: HistoryStore? = nil,
+        branchSuggester: BranchSuggester? = nil,
+        contextProvider: ContextProvider? = nil,
         audioFactory: @escaping @Sendable () -> AudioCapturing = { AudioCaptureEngine() },
         pasteInjector: TextInjector = PasteboardInjector(),
         keystrokeInjector: TextInjector = KeystrokeInjector(),
@@ -87,6 +98,8 @@ public final class DictationController {
         self.stt = stt
         self.llmCleaner = llmCleaner
         self.history = history
+        self.branchSuggester = branchSuggester
+        self.contextProvider = contextProvider
         self.audioFactory = audioFactory
         self.pasteInjector = pasteInjector
         self.keystrokeInjector = keystrokeInjector
@@ -280,19 +293,28 @@ public final class DictationController {
     /// or another re-insert is in flight. (007 / ADV-004)
     public func reinsert(_ record: HistoryRecord) async {
         guard !phase.isActive, !isReinserting else { return }
+        isReinserting = true
+        defer { isReinserting = false }
+        await performTargetedInsert(record.output)
+    }
+
+    /// Type `text` into the app captured by `snapshotReinsertTarget` (re-insert /
+    /// Smart Replies). Re-verifies that app is still frontmost via the injector's
+    /// preflight (pid compare), sanitizes, honours the secure-field guard +
+    /// output routing, and never synthesizes Return. Callers serialize via
+    /// `isReinserting`. (007 / 009 / ADV-004)
+    private func performTargetedInsert(_ text: String) async {
         guard let target = reinsertTarget else {
             lastError = Self.injectionMessage(InjectionError.focusChanged); return
         }
         let sanitized = TextSanitizer.sanitize(
-            record.output,
+            text,
             options: .init(allowNewlines: !target.isTerminal, stripTrailingNewlines: true)
         )
         guard !sanitized.isEmpty else { return }
         let strategy = InjectionRouter.strategy(routing: settings.settings.outputRouting,
                                                 isTerminal: target.isTerminal)
         let plan = InjectionPlan(target: target, strategy: strategy, stripTrailingNewlines: true)
-        isReinserting = true
-        defer { isReinserting = false }
         do {
             try await injector(for: strategy).inject(sanitized, plan: plan)
             lastResult = sanitized
@@ -300,6 +322,93 @@ public final class DictationController {
         } catch {
             lastError = Self.injectionMessage(error)
         }
+    }
+
+    // MARK: - Smart Replies (009)
+
+    /// True when an LLM reply-suggester is compiled into this build (MLX build).
+    public var branchSuggesterPresent: Bool { branchSuggester != nil }
+
+    public var smartRepliesEnabled: Bool {
+        get { settings.settings.smartRepliesEnabled }
+        set {
+            settings.update { $0.smartRepliesEnabled = newValue }
+            if !newValue { clearBranchSuggestions() }   // stop holding any read context
+        }
+    }
+
+    /// Called when the Smart Replies UI appears: snapshot the target app (so a
+    /// later pick lands there, not in Bark's popover — same pattern as re-insert),
+    /// read its latest message, and publish the instant deterministic quick
+    /// replies. The read context is held only until the menu closes.
+    public func prepareBranchContext() async {
+        clearBranchSuggestions()
+        guard smartRepliesEnabled, !phase.isActive else { return }
+        snapshotReinsertTarget()
+        guard let provider = contextProvider,
+              let context = await provider.currentContext(),
+              !context.lastMessage.isEmpty else {
+            branchNotice = "No reply context found in the focused app."
+            return
+        }
+        branchContext = context
+        branchOptions = BasicBranchSuggester.suggestions(for: context)
+    }
+
+    /// Whether we have a read context to suggest replies from (menu is showing
+    /// options for a real focused-app message).
+    public var hasBranchContext: Bool { branchContext != nil }
+
+    /// Whether the model is enabled, present, and ready to generate AI replies.
+    public var canSuggestWithLLM: Bool {
+        smartRepliesEnabled && settings.settings.llmEnabled
+            && branchSuggesterPresent && llmStatus == .ready
+    }
+
+    /// Replace the quick replies with the model's most-likely replies. Runs under
+    /// the same hard deadline as cleanup and falls back (keeps the quick replies)
+    /// on timeout/failure/empty — never blocks. (Principle V)
+    public func requestLLMSuggestions() async {
+        guard smartRepliesEnabled, !branchSuggesting, let context = branchContext else { return }
+        guard settings.settings.llmEnabled, let suggester = branchSuggester, await suggester.isAvailable else {
+            branchNotice = "Enable the LLM (Settings → General) for AI suggestions."
+            return
+        }
+        branchSuggesting = true
+        branchNotice = nil
+        defer { branchSuggesting = false }
+        do {
+            let options = try await withThrowingDeadline(seconds: cleanupDeadline) {
+                try await suggester.suggest(for: context, maxOptions: 4)
+            }
+            guard !options.isEmpty else {
+                branchNotice = "No AI suggestions — using quick replies."
+                return
+            }
+            branchOptions = options
+            branchUsedLLM = true
+        } catch {
+            branchNotice = "Couldn't generate AI suggestions — using quick replies."
+            BarkLog.cleanup.error("branch suggest failed: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    /// Type a chosen reply into the snapshotted app. Does NOT submit (no Return —
+    /// auto-submit is out of scope, Principle IV). Serialized with re-insert.
+    public func chooseBranch(_ option: BranchOption) async {
+        guard !phase.isActive, !isReinserting else { return }
+        isReinserting = true
+        await performTargetedInsert(option.payload)
+        isReinserting = false
+        clearBranchSuggestions()
+    }
+
+    /// Drop any suggestions and the read context (called on dismiss / disable).
+    public func clearBranchSuggestions() {
+        branchOptions = []
+        branchUsedLLM = false
+        branchNotice = nil
+        branchContext = nil
     }
 
     public func purgeHistory() async {
