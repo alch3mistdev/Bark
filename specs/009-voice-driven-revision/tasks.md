@@ -22,7 +22,7 @@
       stating: "preserve meaning, preserve identifiers in code mode, do not add content the user
       did not ask for."
 - [ ] T014 [BarkCore] `HistoryRecord` extended with `parentID: UUID?`. Tolerant decode (old
-      payloads → parentID = nil). No explicit migration step needed: the encrypted store rewrites
+      payloads → parentID = nil). No explicit migration step is needed: the encrypted store rewrites
       the entire `[HistoryRecord]` file atomically on every `append`, so old records naturally
       re-encode with `parentID = nil` on the next write.
 

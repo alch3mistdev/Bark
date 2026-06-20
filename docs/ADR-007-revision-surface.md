@@ -143,7 +143,7 @@ text and surfaces a clear refusal — *never* destroys the field. This mirrors t
   - Settings round-trip: `revisionHotkey` + `revisionEnabled` survive encode/decode
 - Manual: dictate → revise → revise → revert via History pane (lean build uses dictionary
   commands; MLX build uses LLM). Documented as on-device-only per constitution L-5.
-- SECURITY.md ☐ → ☑ for the revision surface (separate update in this PR).
+- SECURITY.md ☐ → ☑ for the revision surface (upon implementation; controls remain ☐ in this spec-only PR).
 
 ## Related
 
