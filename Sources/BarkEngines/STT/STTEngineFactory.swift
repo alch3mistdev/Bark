@@ -53,8 +53,7 @@ public enum STTEngineFactory {
             let data = try Data(contentsOf: url)
             return try JSONDecoder().decode(ModelManifest.self, from: data)
         } catch {
-            BarkLog.stt.error("manifest parse failed for \(id.rawValue, privacy: .public): "
-                              + "\(String(describing: error), privacy: .public)")
+            BarkLog.stt.error("manifest parse failed for \(id.rawValue, privacy: .public): \(String(describing: error), privacy: .public)")
             return nil
         }
     }
