@@ -32,13 +32,13 @@ text becomes "Thank you for your email. I will respond shortly." without any oth
 1. **Given** a recent injection in the focused field, **When** the user invokes the revision hotkey
    and speaks an instruction, **Then** the LLM rewrites the just-injected text in place.
 2. **Given** the revision hotkey, **When** the user holds it and speaks, **Then** the recording HUD
-   appears with the existing affordances (level meter, live partial), and releases on key-up fire the
+   appears with the existing affordances (level meter, live partial), and on key-up fires the
    revision.
 3. **Given** no recent injection (or the focused field is empty / the previous injection targeted a
    different field), **When** the user invokes the revision hotkey, **Then** Bark surfaces a clear,
    non-error message ("Nothing to revise yet — dictate something first") and does not destroy focus.
 4. **Given** the LLM is disabled / not ready / off-mode, **When** the user invokes the revision
-   hotkey, **Then** Bark falls back to a deterministic command dictionary (see US5) and rejects
+   hotkey, **Then** Bark falls back to a deterministic command dictionary (see US3) and rejects
    anything unknown with "Bark can't do that yet."
 5. **Given** the revision rewrite completes, **When** the LLM output fails validation (`OutputValidator`
    length, control chars, banned tokens), **Then** the original text is preserved verbatim and the

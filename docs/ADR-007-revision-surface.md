@@ -1,6 +1,6 @@
 # ADR-007 — Voice-driven revision of the last injection
 
-**Status:** Accepted (subject to spec review — see `specs/009-voice-driven-revision/spec.md`)
+**Status:** Proposed (pending spec review and implementation — see `specs/009-voice-driven-revision/spec.md`)
 **Date:** 2026-06-19
 **Context:** `specs/009-voice-driven-revision/spec.md`
 

@@ -50,7 +50,7 @@ public protocol RevisionEngine: Sendable {
     /// the revised text. Throws `RevisionError` on unrecoverable failures
     /// (timeout, validation, focus drift). Deterministic engines (the
     /// dictionary) return the same result for the same instruction + previous.
-    func revise(previous: String, instruction: String, mode: Mode) async throws -> String
+    func revise(previous: String, instruction: String, mode: Mode) async throws -> RevisionOutcome
 }
 
 public enum RevisionError: Error, Sendable, Equatable {
@@ -166,7 +166,7 @@ Sources/BarkCore/Revision/RevisionAction.swift              (new — AX action e
 Sources/BarkCore/Cleanup/Mode.swift                         (extend — revisionPrompt + defaultRevisionPrompt)
 Sources/BarkCore/Cleanup/PromptTemplate.swift               (extend — revisionSystem(for:))
 Sources/BarkCore/History/HistoryRecord.swift                (extend — parentID: UUID?)
-Sources/Bark/Revision/LLMRevisionEngine.swift               (new — gated by MLXCleanup, mirrors MLXTextCleaner stub pattern)
+Sources/BarkCleanupMLX/LLMRevisionEngine.swift               (new — gated by MLXCleanup, mirrors MLXTextCleaner stub pattern)
 Sources/Bark/DictationController.swift                      (extend — reviseLastInjection, second hotkey)
 Sources/Bark/CompositionRoot.swift                         (extend — wire RevisionEngine composition)
 Sources/Bark/UI/SettingsView.swift                          (extend — revision hotkey recorder, toggle, history badge)

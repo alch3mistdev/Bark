@@ -22,13 +22,13 @@
       stating: "preserve meaning, preserve identifiers in code mode, do not add content the user
       did not ask for."
 - [ ] T014 [BarkCore] `HistoryRecord` extended with `parentID: UUID?`. Tolerant decode (old
-      payloads → parentID = nil).
-- [ ] T015 [BarkEngines] `EncryptedHistoryStore` migration — re-read existing file, decode each
-      record with the new schema (parentID = nil for legacy), re-encode atomically.
+      payloads → parentID = nil). No explicit migration step needed: the encrypted store rewrites
+      the entire `[HistoryRecord]` file atomically on every `append`, so old records naturally
+      re-encode with `parentID = nil` on the next write.
 
 ## Phase 3 — US1 + US5: Quick revise (the core feature, security-first)
 
-- [ ] T020 [Bark] `LLMRevisionEngine` (Sources/Bark/Revision/LLMRevisionEngine.swift) gated by
+- [ ] T020 [BarkCleanupMLX] `LLMRevisionEngine` (Sources/BarkCleanupMLX/LLMRevisionEngine.swift) gated by
       `#if MLXCleanup`. Real impl calls `MLXTextCleaner.clean(...)` with the revision prompt +
       previous text + instruction, then `OutputValidator.validate(revised, against: previous)`
       with the new "length drift ≤ 2×" rule. Stub under `#else` throws `RevisionError.llmUnavailable`.

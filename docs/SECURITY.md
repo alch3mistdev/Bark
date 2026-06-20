@@ -34,23 +34,23 @@ code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the nex
   text; it is text only, never executed. (AIML-001/004 / SEC-011)
 - ☑ Fresh stateless session per rewrite — no conversation state bleeds across dictations.
 
-## Revision surface  (`Sources/Bark/Revision/*`, ADR-007, `specs/009-voice-driven-revision/`)
-- ☑ Refuses when `IsSecureEventInputEnabled()` or `AXSecureTextField` is focused
+## Revision surface  (`BarkCore/Revision/*`, `BarkCleanupMLX/LLMRevisionEngine.swift`, `Sources/Bark/DictationController.swift`, ADR-007, `specs/009-voice-driven-revision/`)
+- ☐ Refuses when `IsSecureEventInputEnabled()` or `AXSecureTextField` is focused
   (`SecureFieldPolicy`). (SEC-002 re-applied)
-- ☑ Re-verifies the focused app's PID immediately before applying the rewrite (`FocusGuard`); aborts
+- ☐ Re-verifies the focused app's PID immediately before applying the rewrite (`FocusGuard`); aborts
   on mismatch. (SEC-004 re-applied)
-- ☑ Output passes `TextSanitizer` (C0/C1, ANSI escapes, bidi strip) before insertion. (SEC-011 re-applied)
-- ☑ Spoken revision instruction is fenced as **untrusted data** inside `<revision>` in
+- ☐ Output passes `TextSanitizer` (C0/C1, ANSI escapes, bidi strip) before insertion. (SEC-011 re-applied)
+- ☐ Spoken revision instruction is fenced as **untrusted data** inside `<revision>` in
   `PromptTemplate.revisionSystem`; the previous text is fenced inside `<previous>`. Mirrors
   SEC-010 with the new revision surface.
-- ☑ `OutputValidator` gains a **length-drift rule**: revised text must be ≤ 2× the previous text's
+- ☐ `OutputValidator` gains a **length-drift rule**: revised text must be ≤ 2× the previous text's
   length. Catches the "expand to include a phishing URL or external payload" prompt-injection
   pattern even if all other fences fail.
-- ☑ Dictionary commands (`delete that`, `undo`, `select all`, `copy`, `scratch that`) are pure
-  AX actions; they never write to the focused field's text content. They emit a ⌘Z / ⌘A / ⌘C
+- ☐ Dictionary commands (`delete that`, `undo`, `select all`, `copy`, `scratch that`) are pure
+  AX actions; they do not inject new text content into the focused field. They emit a ⌘Z / ⌘A / ⌘C
   event only when the focused app accepts those shortcuts; if the app rejects them, Bark falls
   back to a clear refusal (no error, no destruction).
-- ☑ History linkage: every revision produces a `HistoryRecord` with `parentID` set; the user can
+- ☐ History linkage: every revision produces a `HistoryRecord` with `parentID` set; the user can
   revert the chain via Settings ▸ History. Revisions that fail validation preserve the
   original text (no destruction). (SEC-013)
 - **Residual (L-7 — Electron / web text fields):** AX range manipulation for "select-all + replace"
