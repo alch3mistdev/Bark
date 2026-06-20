@@ -25,6 +25,10 @@ public actor ParakeetEngine: STTEngine {
     private var localeID = "en-US"
     private var isPrepared = false
     private var asr: AsrManager?
+    /// Continuation for the per-session audio stream. `feed(_:)` yields chunks
+    /// here; `finishStream()` / `cancel()` finish it so the batch transcription
+    /// Task in `beginStream` knows when all audio has arrived.
+    private var audioContinuation: AsyncStream<[Float]>.Continuation?
 
     public init(manifest: ModelManifest? = nil, downloader: ModelDownloading? = nil) {
         self.manifest = manifest
@@ -54,16 +58,32 @@ public actor ParakeetEngine: STTEngine {
 
     public func beginStream() async throws -> AsyncThrowingStream<STTResult, Error> {
         guard isPrepared, let asr else { throw STTError.notPrepared }
+        // Tear down any previous session's audio stream.
+        audioContinuation?.finish()
+        audioContinuation = nil
+
+        // Build a channel that bridges `feed(_:)` calls into the Task below.
+        var audioCont: AsyncStream<[Float]>.Continuation?
+        let audioStream = AsyncStream<[Float]>(bufferingPolicy: .unbounded) { cont in
+            audioCont = cont
+        }
+        self.audioContinuation = audioCont
+
         // FluidAudio's batch ASR returns `transcribe(_:source:)` with a single
         // final result; we yield a single `STTResult(isFinal: true)`. A future
         // revision can adopt FluidAudio's streaming API when it's released; the
         // protocol doesn't change.
         let (stream, cont) = AsyncThrowingStream<STTResult, Error>.makeStream()
         let locale = localeID
-        Task { [asr] in
+        Task { [asr, audioStream] in
             do {
-                let samples = await Self.collectUtterance()
-                let result = try await asr.transcribe(samples, source: .system)
+                // Accumulate all PCM frames from `feed(_:)` calls; the stream
+                // finishes when `finishStream()` or `cancel()` is called.
+                var allSamples: [Float] = []
+                for await chunk in audioStream {
+                    allSamples.append(contentsOf: chunk)
+                }
+                let result = try await asr.transcribe(allSamples, source: .system)
                 if locale != "auto" && !result.detectedLanguage.isEmpty
                     && result.detectedLanguage != locale {
                     BarkLog.stt.warning("parakeet detected \(result.detectedLanguage, privacy: .public)"
@@ -79,19 +99,21 @@ public actor ParakeetEngine: STTEngine {
     }
 
     public func feed(_ frames: AudioFrames) async {
-        // Symmetric with WhisperKitEngine — real adapters implement a chunked
-        // async source inside beginStream. The protocol stays identical.
+        audioContinuation?.yield(frames.samples)
     }
 
-    public func finishStream() async throws {}
+    public func finishStream() async throws {
+        // Signal that all audio has been fed; the Task in beginStream will
+        // drain the remaining chunks and run the batch transcription.
+        audioContinuation?.finish()
+        audioContinuation = nil
+    }
 
-    public func cancel() async {}
-
-    /// Internal placeholder — a streaming-capable adapter would buffer PCM
-    /// samples here and `await` them on `finishStream`. Today's FluidAudio
-    /// batch API doesn't need it; included so the API surface is symmetric
-    /// with `WhisperKitEngine`.
-    private static func collectUtterance() async -> [Float] { [] }
+    public func cancel() async {
+        // Finish the audio stream so the transcription Task exits cleanly.
+        audioContinuation?.finish()
+        audioContinuation = nil
+    }
 }
 
 #else
@@ -99,7 +121,7 @@ public actor ParakeetEngine: STTEngine {
 /// Stub compiled when the Parakeet backend is not present (default lean build).
 /// See `WhisperKitEngine` for the rationale and activation path.
 public final class ParakeetEngine: STTEngine, @unchecked Sendable {
-    public init() {}
+    public init(manifest: ModelManifest? = nil, downloader: ModelDownloading? = nil) {}
 
     public func prepare(locale: String) async throws {
         throw STTError.engineFailure("Parakeet backend not compiled in this build. "

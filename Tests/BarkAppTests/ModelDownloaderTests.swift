@@ -44,39 +44,38 @@ final class ModelDownloaderTests: XCTestCase {
         _ = networkCalls   // anchor the variable so the intent is documented
     }
 
-    // MARK: - Stale cache: corrupted file is dropped and re-downloaded
+    // MARK: - Stale cache: corrupted file is dropped before any download attempt
 
     func testStaleCacheIsRejectedBeforeReuse() async throws {
         // Pre-populate with WRONG bytes (whose hash doesn't match the manifest).
         let badPayload = Data("corrupted model bytes".utf8)
         let manifest = makeManifest(
             sha256: CryptoKitSHA256().hash(of: Data("correct payload".utf8)),
-            sizeBytes: UInt64(badPayload.count)
+            sizeBytes: UInt64(badPayload.count),
+            // Use an HTTP URL so the downloader throws .insecureURL immediately
+            // after deleting the stale cache — no network required.
+            url: URL(string: "http://example.com/weights.bin")!
         )
         try ModelStore.ensureDirectoryExists(tempDir)
         let cachedURL = ModelStore.cachedURL(for: manifest, in: tempDir)
         try badPayload.write(to: cachedURL)
 
-        // We can't easily stub URLSession.download in-process without a custom
-        // protocol, but we CAN assert that the cached file is dropped on hash
-        // mismatch before the download is attempted — by running against a
-        // URL that fails fast (404) and confirming the error is hash mismatch
-        // (not "model cache hit"), meaning the engine checked the hash first.
-        //
-        // For this test we accept that a real download attempt fails; we just
-        // assert the pre-existing file was not the source of the result.
         do {
             _ = try await ModelDownloader(
-                session: .shared, cacheDirectory: tempDir
+                session: URLSession(configuration: .ephemeral), cacheDirectory: tempDir
             ).ensureModel(for: manifest)
-            XCTFail("expected an error from hash mismatch / download failure")
+            XCTFail("expected an error")
+        } catch ModelError.insecureURL {
+            // Correct: the stale file was deleted and the insecure URL was rejected.
         } catch {
-            // Either size mismatch on a 404 (bytes != manifest.sizeBytes) or
-            // hash mismatch if we somehow got bytes — both are the right kind
-            // of error: the cache wasn't trusted.
-            XCTAssertTrue(error is ModelError || error is STTError,
-                          "got unexpected error: \(error)")
+            XCTFail("expected .insecureURL, got: \(error)")
         }
+
+        // The corrupt cached file must have been removed before the URL check.
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: cachedURL.path),
+            "stale cache file should have been deleted on hash mismatch"
+        )
     }
 
     // MARK: - Manifest sanity checks
@@ -154,12 +153,13 @@ final class ModelDownloaderTests: XCTestCase {
 
     private func makeManifest(
         sha256: String = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
-        sizeBytes: UInt64 = 11
+        sizeBytes: UInt64 = 11,
+        url: URL = URL(string: "https://huggingface.co/test/resolve/main/weights.bin")!
     ) -> ModelManifest {
         ModelManifest(
             modelID: "test-model",
             backend: .whisperkit,
-            url: URL(string: "https://huggingface.co/test/resolve/main/weights.bin")!,
+            url: url,
             sha256: sha256,
             sizeBytes: sizeBytes
         )

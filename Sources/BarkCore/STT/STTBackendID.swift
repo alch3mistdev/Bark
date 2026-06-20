@@ -10,7 +10,7 @@ import Foundation
 /// backend (e.g. a smaller on-device Parakeet variant) can be added without
 /// breaking older settings payloads (settings decode tolerantly — see
 /// `Settings.init(from:)`).
-public enum STTBackendID: String, Codable, Sendable, CaseIterable, Equatable {
+public enum STTBackendID: String, Codable, Sendable, CaseIterable, Equatable, Identifiable {
     /// Apple `SpeechAnalyzer` / `SpeechTranscriber` (macOS 26). Default — lowest
     /// latency, ANE, zero bundled weight, fully offline after the locale install.
     /// Always available.
@@ -25,6 +25,17 @@ public enum STTBackendID: String, Codable, Sendable, CaseIterable, Equatable {
     /// Apache-2.0. Available when the binary is built with `Package-stt-extras.swift`
     /// (`FLUIDAUDIO` defined).
     case parakeet
+
+    /// Stable identifier for SwiftUI `ForEach` and `Picker` (via `Identifiable`).
+    public var id: String { rawValue }
+
+    /// Tolerant decoder: unknown future raw values fall back to `.apple` so a
+    /// settings payload written by a newer build never bricks an older one.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        self = STTBackendID(rawValue: raw) ?? .apple
+    }
 
     /// Human-readable label for the Settings UI.
     public var displayName: String {

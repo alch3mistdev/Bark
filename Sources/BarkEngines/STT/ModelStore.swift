@@ -23,7 +23,13 @@ public enum ModelStore {
 
     /// On-disk path for a manifest's verified bundle.
     public static func cachedURL(for manifest: ModelManifest, in directory: URL) -> URL {
-        let fileName = "\(manifest.backend.rawValue)--\(manifest.modelID).bin"
+        // Sanitise `modelID` so a malicious manifest (e.g. containing `/`, `\`,
+        // or `..`) cannot escape the intended cache directory.
+        let safeID = manifest.modelID
+            .replacingOccurrences(of: "/",  with: "_")
+            .replacingOccurrences(of: "\\", with: "_")
+            .replacingOccurrences(of: "..",  with: "_")
+        let fileName = "\(manifest.backend.rawValue)--\(safeID).bin"
         return directory.appendingPathComponent(fileName)
     }
 

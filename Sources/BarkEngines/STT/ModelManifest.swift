@@ -45,6 +45,20 @@ public struct ModelManifest: Codable, Sendable, Equatable {
         self.minOSVersion = minOSVersion
     }
 
+    /// Custom decoder that normalises `sha256` to lowercase so manifests with
+    /// uppercase hex (e.g. from some hash-utility output) don't silently pass
+    /// `sha256Bytes` validation while then failing the hash comparison in
+    /// `ModelDownloader`.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        modelID = try c.decode(String.self, forKey: .modelID)
+        backend = try c.decode(STTBackendID.self, forKey: .backend)
+        url = try c.decode(URL.self, forKey: .url)
+        sha256 = try c.decode(String.self, forKey: .sha256).lowercased()
+        sizeBytes = try c.decode(UInt64.self, forKey: .sizeBytes)
+        minOSVersion = try c.decodeIfPresent(String.self, forKey: .minOSVersion)
+    }
+
     /// Decoded hex SHA-256 (`Data`), or `nil` if the manifest's field is not a
     /// valid 64-character hex string. Validated up-front so a bad manifest never
     /// reaches the downloader.
@@ -63,15 +77,30 @@ public struct ModelManifest: Codable, Sendable, Equatable {
     }
 }
 
-/// Errors raised by the manifest / download / verification pipeline. All errors
-/// are `STTError`-shaped so the controller's existing `Self.describe(error)`
-/// maps them to actionable UI messages.
-public enum ModelError: Error, Sendable, Equatable {
+/// Errors raised by the manifest / download / verification pipeline. Conforms
+/// to `LocalizedError` so `DictationController.describe(_:)` can surface a
+/// meaningful message to the user rather than a generic NSError string.
+public enum ModelError: Error, LocalizedError, Sendable, Equatable {
     case manifestMalformed(String)
     case hashMismatch(manifest: String, actual: String)
     case sizeMismatch(expected: UInt64, actual: UInt64)
     case insecureURL(String)
     case directoryUnavailable
+
+    public var errorDescription: String? {
+        switch self {
+        case .manifestMalformed(let detail):
+            return "Model manifest is invalid: \(detail)"
+        case .hashMismatch(let expected, let actual):
+            return "Model integrity check failed (expected \(expected.prefix(8))…, got \(actual.prefix(8))…). The file may be corrupted or tampered with."
+        case .sizeMismatch(let expected, let actual):
+            return "Model size mismatch (expected \(expected) bytes, got \(actual) bytes)."
+        case .insecureURL(let url):
+            return "Model URL is not HTTPS: \(url). Download refused for security."
+        case .directoryUnavailable:
+            return "The model cache directory could not be created."
+        }
+    }
 }
 
 /// Computes SHA-256 over a file's contents in constant memory (chunked read) so

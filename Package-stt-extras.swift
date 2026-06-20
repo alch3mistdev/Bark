@@ -6,8 +6,7 @@
 //
 // This pulls WhisperKit (via Argmax's unified open-source SDK) and FluidAudio
 // (Core ML host for NVIDIA Parakeet) as SwiftPM dependencies and compiles the
-// real engines defined in `Sources/BarkEngines/STT/{WhisperKitEngine,ParakeetEngine}.swi
-ft`.
+// real engines defined in `Sources/BarkEngines/STT/{WhisperKitEngine,ParakeetEngine}.swift`.
 // The `WHISPERKIT` / `FLUIDAUDIO` compile flags gate the real implementations;
 // without the flags the same files compile to thin stubs that throw
 // `.engineFailure("... not compiled in this build")`, so the lean pipeline

@@ -71,16 +71,13 @@ final class STTEngineStubTests: XCTestCase {
     }
 
     func testUnknownSTTBackendIDFallsBackOnDecode() throws {
-        // A setting from a future build with a backend we don't know — decode
-        // tolerantly MUST NOT throw, otherwise the user's settings would be
-        // silently lost. Today's `init(from:)` returns .apple on missing keys,
-        // but a present-but-unknown raw value would still throw. We assert
-        // current behaviour so any future regression is caught.
+        // A setting from a future build with a backend we don't know MUST NOT
+        // throw; the tolerant init(from:) in STTBackendID falls back to .apple
+        // so the user's other settings are preserved.
         let payload = """
         {"selectedModeID":"clean","localeID":"en-US","sttBackend":"future-model-v99"}
         """
-        XCTAssertThrowsError(
-            try JSONDecoder().decode(Settings.self, from: Data(payload.utf8))
-        )
+        let decoded = try JSONDecoder().decode(Settings.self, from: Data(payload.utf8))
+        XCTAssertEqual(decoded.sttBackend, .apple)
     }
 }

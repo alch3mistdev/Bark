@@ -60,10 +60,12 @@ public actor ModelDownloader: ModelDownloading {
             throw ModelError.insecureURL(manifest.url.absoluteString)
         }
 
-        // Download. We materialise the body in memory for SHA-256 — multi-GB
-        // bundles are large but not unreasonable for a desktop app, and the
-        // alternative (streaming hash while writing) is harder to make atomic.
-        // A streaming-hash variant can replace this without changing the protocol.
+        // Stream the download to a system-managed temporary file via
+        // URLSession.download(from:), then hash that file in constant memory
+        // (1 MB chunks in CryptoKitSHA256). The temp file is removed by the
+        // `defer` below; the final `moveItem` is a rename-based move on APFS
+        // (the typical macOS filesystem), which is effectively atomic for
+        // concurrent `ensureModel` callers.
         let (tempURL, response) = try await session.download(from: manifest.url)
         defer { try? FileManager.default.removeItem(at: tempURL) }
 

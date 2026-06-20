@@ -30,6 +30,10 @@ public actor WhisperKitEngine: STTEngine {
     private var localeID = "en-US"
     private var isPrepared = false
     private var pipeline: WhisperKit?
+    /// Continuation for the per-session audio stream. `feed(_:)` yields chunks
+    /// here; `finishStream()` / `cancel()` finish it so the Task in `beginStream`
+    /// knows when all audio has arrived.
+    private var audioContinuation: AsyncStream<[Float]>.Continuation?
 
     public init(manifest: ModelManifest? = nil, downloader: ModelDownloading? = nil) {
         self.manifest = manifest
@@ -64,6 +68,17 @@ public actor WhisperKitEngine: STTEngine {
 
     public func beginStream() async throws -> AsyncThrowingStream<STTResult, Error> {
         guard isPrepared, let pipeline else { throw STTError.notPrepared }
+        // Tear down any previous session's audio stream.
+        audioContinuation?.finish()
+        audioContinuation = nil
+
+        // Build a channel that bridges `feed(_:)` calls into the Task below.
+        var audioCont: AsyncStream<[Float]>.Continuation?
+        let audioStream = AsyncStream<[Float]>(bufferingPolicy: .unbounded) { cont in
+            audioCont = cont
+        }
+        self.audioContinuation = audioCont
+
         // The pipeline code is identical to the Apple backend's path — that's
         // the whole point of the protocol. SDK NOTE: `transcribeStream` is the
         // push-style API; the real call signature should be re-verified, but
@@ -71,10 +86,16 @@ public actor WhisperKitEngine: STTEngine {
         // pipeline reads.
         let (stream, cont) = AsyncThrowingStream<STTResult, Error>.makeStream()
         let locale = localeID
-        Task { [pipeline] in
+        Task { [pipeline, audioStream] in
             do {
+                // Accumulate all PCM frames from `feed(_:)` calls; the stream
+                // finishes when `finishStream()` or `cancel()` is called.
+                var allSamples: [Float] = []
+                for await chunk in audioStream {
+                    allSamples.append(contentsOf: chunk)
+                }
                 for try await result in pipeline.transcribeStream(
-                    audioArray: [],
+                    audioArray: allSamples,
                     decodeOptions: DecodingOptions(language: locale)
                 ) {
                     cont.yield(STTResult(text: result.text, isFinal: !result.isPartial))
@@ -88,19 +109,20 @@ public actor WhisperKitEngine: STTEngine {
     }
 
     public func feed(_ frames: AudioFrames) async {
-        // WhisperKit's `transcribeStream` is push-based; the protocol is
-        // symmetric by buffering into a private queue consumed by `beginStream`.
-        // A real adapter would re-implement streaming over a chunked async source.
+        audioContinuation?.yield(frames.samples)
     }
 
     public func finishStream() async throws {
-        // The transcription loop in beginStream finishes when WhisperKit's source
-        // completes; nothing to finalize here.
+        // Signal that all audio has been fed; the Task in beginStream will
+        // drain the remaining chunks and finish the results stream.
+        audioContinuation?.finish()
+        audioContinuation = nil
     }
 
     public func cancel() async {
-        // WhisperKit's stream observes task cancellation cooperatively; the
-        // beginStream Task is cancelled by the pipeline's caller path.
+        // Finish the audio stream so the transcription Task exits cleanly.
+        audioContinuation?.finish()
+        audioContinuation = nil
     }
 }
 
@@ -111,7 +133,7 @@ public actor WhisperKitEngine: STTEngine {
 /// UI can hide the option. Activate by switching to `Package-stt-extras.swift`
 /// (see README → "Optional: enable WhisperKit / Parakeet backends").
 public final class WhisperKitEngine: STTEngine, @unchecked Sendable {
-    public init() {}
+    public init(manifest: ModelManifest? = nil, downloader: ModelDownloading? = nil) {}
 
     public func prepare(locale: String) async throws {
         throw STTError.engineFailure("WhisperKit backend not compiled in this build. "
