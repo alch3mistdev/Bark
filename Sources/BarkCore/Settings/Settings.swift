@@ -47,6 +47,7 @@ public struct Settings: Codable, Sendable, Equatable {
     public var customModes: [Mode]
     public var appModeMap: [String: String]   // focused-app bundleID → modeID
     public var localeID: String
+    public var sttBackend: STTBackendID
     public var hotkey: HotkeySetting
     public var handsFreeHotkey: HotkeySetting
     public var vadSensitivity: VADSensitivity
@@ -64,6 +65,7 @@ public struct Settings: Codable, Sendable, Equatable {
         customModes: [Mode] = [],
         appModeMap: [String: String] = [:],
         localeID: String = "en-US",
+        sttBackend: STTBackendID = .apple,
         hotkey: HotkeySetting = .default,
         handsFreeHotkey: HotkeySetting = HotkeySetting(kind: .keyToggle, keyCode: 96, modifierFlags: 0),
         vadSensitivity: VADSensitivity = .medium,
@@ -80,6 +82,7 @@ public struct Settings: Codable, Sendable, Equatable {
         self.customModes = customModes
         self.appModeMap = appModeMap
         self.localeID = localeID
+        self.sttBackend = sttBackend
         self.hotkey = hotkey
         self.handsFreeHotkey = handsFreeHotkey
         self.vadSensitivity = vadSensitivity
@@ -103,6 +106,7 @@ public struct Settings: Codable, Sendable, Equatable {
         customModes = try c.decodeIfPresent([Mode].self, forKey: .customModes) ?? d.customModes
         appModeMap = try c.decodeIfPresent([String: String].self, forKey: .appModeMap) ?? d.appModeMap
         localeID = try c.decodeIfPresent(String.self, forKey: .localeID) ?? d.localeID
+        sttBackend = try c.decodeIfPresent(STTBackendID.self, forKey: .sttBackend) ?? d.sttBackend
         hotkey = try c.decodeIfPresent(HotkeySetting.self, forKey: .hotkey) ?? d.hotkey
         handsFreeHotkey = try c.decodeIfPresent(HotkeySetting.self, forKey: .handsFreeHotkey) ?? d.handsFreeHotkey
         vadSensitivity = try c.decodeIfPresent(VADSensitivity.self, forKey: .vadSensitivity) ?? d.vadSensitivity

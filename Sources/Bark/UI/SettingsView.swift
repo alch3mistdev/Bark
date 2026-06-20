@@ -169,8 +169,20 @@ private struct GeneralPane: View {
                 Picker("Language", selection: $controller.localeID) {
                     ForEach(supportedLocales, id: \.0) { Text($0.1).tag($0.0) }
                 }
-                LabeledContent("Engine", value: "Apple SpeechAnalyzer (on-device)")
+                Picker("Engine", selection: $controller.sttBackend) {
+                    ForEach(STTBackendID.allCases.filter { $0.isCompiledIn }) { id in
+                        Text(id.displayName).tag(id)
+                    }
+                }
+                .disabled(controller.phase.isActive)
                 LabeledContent("Status", value: controller.isModelReady ? "Ready" : "Preparing…")
+                if controller.sttBackend != .apple {
+                    Text(controller.sttBackend.blurb)
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Models are downloaded over HTTPS and SHA-256 verified against a bundled "
+                         + "manifest before they're allowed into the cache (SEC-003).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             Section("Cleanup") {
                 Toggle("Use LLM rewrite for LLM modes", isOn: $controller.llmEnabled)

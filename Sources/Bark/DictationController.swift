@@ -42,7 +42,7 @@ public final class DictationController {
     private let hotkey: HotkeyManager
     private let handsFreeHotkey: HotkeyManager
     private let audioFactory: @Sendable () -> AudioCapturing
-    private let stt: STTEngine
+    private var stt: STTEngine
     private let basicCleaner = BasicTextCleaner()
     private let llmCleaner: TextCleaner?
     private let pasteInjector: TextInjector
@@ -234,6 +234,29 @@ public final class DictationController {
         set {
             guard newValue != settings.settings.localeID else { return }
             settings.update { $0.localeID = newValue }
+            isModelReady = false
+            Task { await prepareModel() }
+        }
+    }
+
+    /// The active STT backend. Setting rebuilds the engine via the factory and
+    /// triggers a re-prepare. Refuses to swap mid-dictation (the live session's
+    /// analyzer is single-use; see ADV-007 in `SpeechAnalyzerEngine`).
+    public var sttBackend: STTBackendID {
+        get { settings.settings.sttBackend }
+        set {
+            guard newValue != settings.settings.sttBackend else { return }
+            guard !machine.isActive else {
+                lastError = "Stop dictation before changing the speech engine."
+                return
+            }
+            settings.update { $0.sttBackend = newValue }
+            let manifest = STTEngineFactory.bundledManifest(for: newValue)
+            self.stt = STTEngineFactory.make(
+                id: newValue,
+                manifest: manifest,
+                downloader: ModelDownloader()
+            )
             isModelReady = false
             Task { await prepareModel() }
         }
