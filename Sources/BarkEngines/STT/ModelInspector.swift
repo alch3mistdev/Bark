@@ -12,10 +12,10 @@ public struct CachedModel: Sendable, Equatable, Identifiable {
     public let sizeBytes: UInt64
     public let modifiedAt: Date
 
-    /// Result of re-verifying the file against its manifest, if a manifest is
-    /// supplied. `nil` means we couldn't find a matching manifest in the bundle
-    /// (e.g. user copied a file into the cache directory by hand).
-    public let verification: Verification
+    /// Result of re-verifying the file against its manifest. `.noManifestFound`
+    /// means we couldn't find a matching manifest in the bundle (e.g. user
+    /// copied a file into the cache directory by hand).
+    public var verification: Verification
 
     public enum Verification: Sendable, Equatable {
         case verified                          // SHA-256 matches manifest
@@ -37,8 +37,8 @@ public struct CachedModel: Sendable, Equatable, Identifiable {
 /// first and re-verify on demand.
 public struct ModelCacheSnapshot: Sendable, Equatable {
     public let directory: URL
-    public let models: [CachedModel]
-    public let totalBytes: UInt64
+    public var models: [CachedModel]
+    public var totalBytes: UInt64
 
     public static let empty = ModelCacheSnapshot(directory: ModelStore.defaultCacheDirectory,
                                                   models: [],
@@ -102,7 +102,7 @@ public actor ModelInspector {
                 url: url,
                 sizeBytes: size,
                 modifiedAt: attrs?.contentModificationDate ?? .distantPast,
-                verification: .notVerified(reason: "Tap Re-verify")
+                verification: manifest == nil ? .noManifestFound : .notVerified(reason: "Tap Re-verify")
             ))
         }
         models.sort { $0.id < $1.id }
@@ -139,9 +139,11 @@ public actor ModelInspector {
     }
 
     /// Open Finder pointed at a cached bundle (or the cache root if nil).
-    public func reveal(_ model: CachedModel? = nil) {
+    public func reveal(_ model: CachedModel? = nil) async {
         let target = model?.url ?? directory
-        NSWorkspace.shared.activateFileViewerSelecting([target])
+        await MainActor.run {
+            NSWorkspace.shared.activateFileViewerSelecting([target])
+        }
     }
 
     // MARK: - Helpers

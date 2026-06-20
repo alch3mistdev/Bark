@@ -85,38 +85,22 @@ final class ModelInspectorTests: XCTestCase {
         let inspector = ModelInspector(directory: tempDir)
         var snap = await inspector.snapshot()
         let model = snap.models[0]
+        XCTAssertEqual(model.verification, .noManifestFound)
         let verified = await inspector.verify(model)
         XCTAssertEqual(verified.verification, .noManifestFound)
         snap.models[0] = verified
         _ = snap
     }
 
-    // MARK: - Hashing via the injected fake
+    // MARK: - Verification result coverage
 
-    func testVerifyWithMatchingFakeHasherReportsVerified() async throws {
-        // We can't bundle a real manifest JSON in a unit test, but we CAN inject
-        // a fake hasher and a fake bundle so that the inspector's verify()
-        // path runs end-to-end with a synthetic "match" outcome.
-        //
-        // The fake bundle returns nil (no JSON resource), so verify() falls
-        // back to .noManifestFound. To test the .verified branch we'd need to
-        // inject a stub manifest lookup; that's covered by the unit-level
-        // ModelManifestTests (CryptoKitSHA256 reference vectors) + the
-        // integration of the model cache (snapshot lists files, verify hashes).
-        //
-        // Here we just confirm that the inspector surfaces a verification
-        // result for every entry — the consumer code in the UI handles all
-        // four cases.
+    func testVerifyWithoutBundledManifestDoesNotReportVerified() async throws {
         try writeCache(backend: .parakeet, modelID: "tdt", payload: Data(repeating: 7, count: 1024))
         let snap = await ModelInspector(directory: tempDir).snapshot()
         let model = snap.models[0]
+        XCTAssertEqual(model.verification, .noManifestFound)
         let verified = await ModelInspector(directory: tempDir).verify(model)
-        // No manifest in this test → either .noManifestFound or .notVerified,
-        // both are valid outcomes for the absent-bundle case.
-        switch verified.verification {
-        case .noManifestFound, .notVerified: break
-        default: XCTFail("expected noManifestFound or notVerified, got \(verified.verification)")
-        }
+        XCTAssertEqual(verified.verification, .noManifestFound)
     }
 
     // MARK: - Helpers

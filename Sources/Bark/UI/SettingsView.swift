@@ -544,12 +544,8 @@ private struct ModelsPane: View {
     }
 
     private func reload() async {
-        do {
-            snapshot = await inspector.snapshot()
-            loadError = nil
-        } catch {
-            loadError = error.localizedDescription
-        }
+        snapshot = await inspector.snapshot()
+        loadError = nil
     }
 }
 
@@ -607,6 +603,6 @@ private struct ModelRow: View {
 
     private func remove() async {
         await inspector.remove(model)
-        snapshot.models.removeAll { $0.id == model.id }
+        snapshot = await inspector.snapshot()
     }
 }
