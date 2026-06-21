@@ -180,6 +180,12 @@ Bark (SwiftUI MenuBarExtra)
 - **Hands-free mode** — a separate toggle hotkey (default **F5**) turns on continuous, voice-activated
   dictation: it records when you speak and inserts when you pause, then keeps listening — no button.
   Adjustable sensitivity (Settings → Hotkey → Hands-free).
+- **Speaker gate** (optional, hands-free only) — enroll your voice, and Bark types only utterances that
+  match it, silently ignoring coworkers, the TV, or a bystander issuing commands. On-device, encrypted,
+  opt-in, deletable. **Honest limit:** it's a convenience filter, *not* security — it does **not** stop a
+  recording, imitation, or clone of *your own* voice, and is not authentication or liveness. It fails
+  **open**: if matching can't run, your own dictation is always typed. Ships in the optional FluidAudio
+  build (WeSpeaker v2); the lean build hides the controls. (Settings → Hotkey → Speaker gate.)
 - **Menu shows the last result** with one-click Copy; subtle start/insert sounds (toggleable).
 - **Custom modes** — add your own rewrite modes (name + system prompt) alongside the built-ins.
 - **Encrypted, opt-in history** — off by default; when on, transcripts are AES-256-GCM encrypted
