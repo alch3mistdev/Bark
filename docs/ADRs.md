@@ -116,3 +116,31 @@ SwiftSyntax reads the file's content; the consent dialog can be bypassed by "Alw
 the regex extractor on non-Swift files can include false positives. See
 `docs/ADR-008-code-intelligence.md` for the full record (alternatives, verification) and
 `specs/010-inline-code-dictation/` for the spec, plan, and tasks.
+
+## ADR-009 — Voice fingerprinting (speaker gate for hands-free)
+**Decision.** Add an opt-in, on-device **speaker gate** to hands-free dictation: per completed
+utterance, extract a 256-d speaker embedding (FluidAudio WeSpeaker v2, behind the existing
+`FLUIDAUDIO` flag — no new dependency, no SBOM delta) and compare it by **cosine similarity** to an
+enrolled centroid; inject only on a match, otherwise suppress with a faint cue and keep listening.
+The seam is a `SpeakerEmbedder` protocol in `BarkCore`; all decision math (`SpeakerEmbedding`,
+`SpeakerVerifier`, `SpeakerVerificationSensitivity`) is pure and unit-tested, with a throwing
+`Noop` embedder in the lean build (callers fail open, so dictation is unaffected). The voiceprint
+(`SpeakerProfile`) is persisted by `EncryptedSpeakerProfileStore` — AES-256-GCM, key in the Keychain
+under a **distinct** service (`com.bark.speaker`) so it deletes independently of history. The gate
+**fails open** everywhere: disabled, not enrolled, model-incompatible, utterance too short (<1.0 s
+voiced), or any embedder error → the user's own dictation is injected as normal. Push-to-talk is
+untouched (already deliberate intent).
+**Why.** In shared/noisy rooms, continuous dictation acts on every speaker. A per-utterance voice
+filter stops coworkers, the TV, and bystander commands from being typed — real value for hands-free.
+Framed **honestly** as a convenience filter, **not** anti-spoofing or authentication: a recording or
+voice-clone of the user yields a near-identical embedding and is accepted (research D4). Reusing the
+already-approved FluidAudio model keeps the dependency/SBOM surface flat.
+**Consequence.** `Settings` grows two tolerant-decoded fields (`speakerGateEnabled` off by default,
+`speakerSensitivity` default medium). `DictationController.runHandsFree` accumulates the utterance
+audio and runs the gate before injection, overlapping the ANE embed with cleanup so no perceptible
+delay is added (SC-004). `SpeakerEnrollmentController` drives a guided 5-phrase enrollment; new cue
+`Feedback.declined()`. STRIDE in `docs/SECURITY.md` gains a "Voiceprint / speaker gate" section.
+~40 new tests (lean build, fake embedder). Honest residual risks: replay/clone accepted; short
+utterances bypass the gate (fail-open by design); starting thresholds (0.40/0.50/0.62) are calibrated
+on real captures before release. See `specs/011-voice-fingerprinting/` for the spec, plan, research,
+and contracts.

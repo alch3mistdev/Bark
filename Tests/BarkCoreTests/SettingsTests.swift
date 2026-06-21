@@ -33,6 +33,23 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(decoded.launchAtLogin)      // default
     }
 
+    func testSpeakerGateDefaultsAndTolerantDecode() throws {
+        // New 011 fields default to off / medium and survive an old payload.
+        XCTAssertFalse(Settings.default.speakerGateEnabled)
+        XCTAssertEqual(Settings.default.speakerSensitivity, .medium)
+
+        let old = try JSONDecoder().decode(Settings.self, from: Data("{}".utf8))
+        XCTAssertFalse(old.speakerGateEnabled)
+        XCTAssertEqual(old.speakerSensitivity, .medium)
+
+        var s = Settings.default
+        s.speakerGateEnabled = true
+        s.speakerSensitivity = .high
+        let round = try JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(s))
+        XCTAssertTrue(round.speakerGateEnabled)
+        XCTAssertEqual(round.speakerSensitivity, .high)
+    }
+
     func testMakeModeRegistryMergesCustomAndSelection() {
         let custom = Mode(id: "legal", name: "Legal", usesLLM: true)
         let s = Settings(selectedModeID: "legal", customModes: [custom])

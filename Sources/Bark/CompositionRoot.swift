@@ -27,6 +27,19 @@ enum CompositionRoot {
 
         let history: HistoryStore = EncryptedHistoryStore()
 
+        // Speaker gate (011). The embedder is the FluidAudio WeSpeaker model in the
+        // full build and a throwing no-op in the lean build (callers fail open). A
+        // bundled `manifest-speaker.json`, when present, pins the integrity-verified
+        // model bundle; absent it, the embedder uses its dev-only load path.
+        let speakerManifest = Bundle.main.url(forResource: "manifest-speaker", withExtension: "json")
+            .flatMap { try? Data(contentsOf: $0) }
+            .flatMap { try? JSONDecoder().decode(ModelManifest.self, from: $0) }
+        let speakerEmbedder: SpeakerEmbedder = FluidAudioSpeakerEmbedder(
+            manifest: speakerManifest,
+            downloader: ModelDownloader()
+        )
+        let speakerStore: SpeakerProfileStore = EncryptedSpeakerProfileStore()
+
         let llm: TextCleaner?
         #if MLXCleanup
         llm = MLXTextCleaner(modelID: "mlx-community/Qwen3-4B-Instruct-2507-4bit")
@@ -41,7 +54,9 @@ enum CompositionRoot {
             stt: stt,
             handsFreeHotkey: handsFreeHotkey,
             llmCleaner: llm,
-            history: history
+            history: history,
+            speakerEmbedder: speakerEmbedder,
+            speakerProfileStore: speakerStore
         )
     }
 }

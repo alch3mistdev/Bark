@@ -22,6 +22,32 @@ code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the nex
   (`AudioCaptureEngine.stop`). No always-listening mode. (T-002 / T-012)
 - ☑ Persistent in-app state (menu-bar icon reflects `listening`), plus the macOS orange indicator.
 
+## Voiceprint / speaker gate  (`BarkCore/Speaker/*`, `BarkEngines/Speaker/*`, ADR-009, `specs/011-voice-fingerprinting/`)
+- ☑ Opt-in and **off by default** (`Settings.speakerGateEnabled`); with it off, behavior is identical to
+  today. Hands-free only — push-to-talk is never gated.
+- ☑ The voiceprint (`SpeakerProfile`: a 256-d centroid + metadata, **no raw enrollment audio**) is
+  encrypted at rest with AES-256-GCM; the key lives in the Keychain
+  (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`) under a **distinct** service `com.bark.speaker`, so
+  deleting the voiceprint and purging history are independent. Ciphertext file is `0600`,
+  `.completeFileProtection`, excluded from backups (`EncryptedSpeakerProfileStore`, clones
+  `EncryptedHistoryStore`).
+- ☑ The voiceprint **never leaves the device**. Enrollment and matching run on-device; the only network
+  event is the user-initiated, SHA-256-verified embedding-model download via the existing
+  `ModelDownloader` (never FluidAudio's unverified `downloadIfNeeded` on a release path).
+- ☑ Delete removes both the ciphertext and the Keychain key (`deleteVoiceprint`). An unreadable/corrupt
+  or wrong-key file degrades to "not enrolled" (backed up to `speaker.enc.corrupt`, never crashes).
+- ☑ A profile whose `modelID` ≠ the running embedder's is treated as **not enrolled** (prompt re-enroll),
+  never silently mis-scored across incompatible vector spaces.
+- ☑ The gate only **suppresses** injection; it never injects more, synthesizes keys, or relaxes the
+  secure-field / sanitization rules. It **fails open** (disabled / not enrolled / model-incompatible /
+  too-short / embedder error → inject as normal), so a gate fault can never lock the user out of their
+  own dictation (FR-009 / SC-006).
+- **Honest residual (constitution IV — never overclaim a control).** This is a **convenience
+  multi-speaker filter, NOT a security control**: it reliably rejects *other* people, but a recording,
+  replay, imitation, or TTS clone of the *user's own* voice produces a near-identical embedding and is
+  **accepted**. It is **not** authentication, liveness, or anti-spoofing (out of scope for v1). In-app +
+  README copy state these limits plainly (FR-011 / SC-007).
+
 ## Text-injection safety  (`BarkEngines/Inject/*`, `BarkCore/Inject/*`)
 - ☑ Refuse injection when `IsSecureEventInputEnabled()` or the focused AX element is `AXSecureTextField`
   (`SecureFieldPolicy` + `SecureFieldDetector`). (SEC-002 / T-005) — **best-effort**, see L-2.

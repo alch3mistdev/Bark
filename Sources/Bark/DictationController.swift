@@ -30,6 +30,7 @@ public final class DictationController {
     public private(set) var handsFreeActive = false
     public private(set) var isReinserting = false   // serializes one-click re-insert (Codex)
     public private(set) var inputLevel: Float = 0    // 0...1 smoothed mic level for the HUD meter
+    public private(set) var speakerEnrolled = false  // a usable voiceprint is loaded (011)
 
     /// Side-channel callbacks wired by the app layer (AppKit windows/HUD).
     public var onPhaseChange: (@MainActor (DictationPhase) -> Void)?
@@ -49,6 +50,9 @@ public final class DictationController {
     private let keystrokeInjector: TextInjector
     private let clipboardInjector: TextInjector
     private let history: HistoryStore?
+    private let speakerEmbedder: SpeakerEmbedder?       // nil / Noop in the lean build → gate fails open
+    private let speakerProfileStore: SpeakerProfileStore?
+    private let speakerVerifier = SpeakerVerifier()
     private let cleanupDeadline: Double
     private let targetProvider: @MainActor () -> InjectionTarget?
 
@@ -64,6 +68,11 @@ public final class DictationController {
     private var llmTask: Task<Void, Never>?
     private var handsFreeTask: Task<Void, Never>?
     private var handsFreeAudio: AudioCapturing?
+    private var speakerProfile: SpeakerProfile?   // enrolled voiceprint, loaded on activate (011)
+
+    /// ≥1.0 s of voiced audio at 16 kHz — below this an utterance is `.tooShort`
+    /// to judge and is injected (fail-open). Matches FluidAudio's minSpeechDuration.
+    private static let minVoicedSamplesForGate = 16_000
 
     public init(
         settings: SettingsStore,
@@ -73,6 +82,8 @@ public final class DictationController {
         handsFreeHotkey: HotkeyManager = HotkeyManager(),
         llmCleaner: TextCleaner?,
         history: HistoryStore? = nil,
+        speakerEmbedder: SpeakerEmbedder? = nil,
+        speakerProfileStore: SpeakerProfileStore? = nil,
         audioFactory: @escaping @Sendable () -> AudioCapturing = { AudioCaptureEngine() },
         pasteInjector: TextInjector = PasteboardInjector(),
         keystrokeInjector: TextInjector = KeystrokeInjector(),
@@ -87,6 +98,8 @@ public final class DictationController {
         self.stt = stt
         self.llmCleaner = llmCleaner
         self.history = history
+        self.speakerEmbedder = speakerEmbedder
+        self.speakerProfileStore = speakerProfileStore
         self.audioFactory = audioFactory
         self.pasteInjector = pasteInjector
         self.keystrokeInjector = keystrokeInjector
@@ -392,6 +405,7 @@ public final class DictationController {
         handsFreeHotkey.start()
 
         Task { await prepareModel() }
+        Task { await loadSpeakerProfile() }   // warm the enrolled voiceprint (011)
         // The LLM model is loaded lazily on first LLM-mode use (see produceText),
         // never at launch — so a model-load failure can't block app startup.
     }
@@ -695,6 +709,90 @@ public final class DictationController {
         set { settings.update { $0.vadSensitivity = newValue } }
     }
 
+    // MARK: - Speaker gate (011)
+
+    /// Whether the speaker-embedding capability is compiled into this binary. The
+    /// lean default build reports `false`; the UI hides the gate controls then
+    /// rather than showing them as broken (FR-013).
+    public var speakerGateAvailable: Bool { STTBackendCompilationFlags.fluidAudio }
+
+    public var speakerGateEnabled: Bool {
+        get { settings.settings.speakerGateEnabled }
+        set { settings.update { $0.speakerGateEnabled = newValue } }
+    }
+
+    public var speakerSensitivity: SpeakerVerificationSensitivity {
+        get { settings.settings.speakerSensitivity }
+        set { settings.update { $0.speakerSensitivity = newValue } }
+    }
+
+    /// (Re)load the enrolled voiceprint from the encrypted store. A profile whose
+    /// `modelID` no longer matches the running embedder is kept but reported as
+    /// *not enrolled* so the user is prompted to re-enroll, never mis-scored.
+    public func loadSpeakerProfile() async {
+        let loaded = await speakerProfileStore?.load()
+        speakerProfile = loaded
+        // "Enrolled" means the gate can actually use the voiceprint: a profile is
+        // present AND a compatible embedder exists. Without an embedder, or with a
+        // model-incompatible profile, the gate can't run → report not enrolled.
+        if let loaded, let embedder = speakerEmbedder {
+            speakerEnrolled = loaded.isCompatible(with: embedder.modelID)
+        } else {
+            speakerEnrolled = false
+        }
+    }
+
+    /// Delete the voiceprint and its protection key; the gate goes inactive (FR-005).
+    public func deleteVoiceprint() async {
+        await speakerProfileStore?.delete()
+        speakerProfile = nil
+        speakerEnrolled = false
+    }
+
+    /// Build a guided enrollment controller sharing this controller's embedder and
+    /// store. Returns `nil` when the capability isn't compiled in (no embedder).
+    public func makeEnrollmentController() -> SpeakerEnrollmentController? {
+        guard let embedder = speakerEmbedder, let store = speakerProfileStore else { return nil }
+        return SpeakerEnrollmentController(
+            embedder: embedder,
+            store: store,
+            audioFactory: audioFactory,
+            sensitivity: { [weak self] in self?.settings.settings.vadSensitivity ?? .medium }
+        )
+    }
+
+    /// Kick off the per-utterance embedding at capture-end so the ANE pass overlaps
+    /// cleanup (SC-004). Returns `nil` — meaning "not gated, inject" — unless the
+    /// gate is enabled, a compatible voiceprint is enrolled, and there is ≥1.0 s of
+    /// voiced audio to judge. The caller awaits the result only at the gate.
+    private func speakerEmbedTaskIfGated(_ samples: [Float]) -> Task<SpeakerEmbedding, Error>? {
+        guard settings.settings.speakerGateEnabled,
+              let embedder = speakerEmbedder,
+              let profile = speakerProfile,
+              profile.isCompatible(with: embedder.modelID),
+              samples.count >= Self.minVoicedSamplesForGate
+        else { return nil }
+        return Task { try await embedder.embed(samples) }
+    }
+
+    /// Resolve the gate decision. A `nil` task means the utterance wasn't gated →
+    /// fail-open inject. Any embedder error also fails open (research D5); only an
+    /// explicit reject/borderline below threshold suppresses injection.
+    private func speakerDecision(_ embedTask: Task<SpeakerEmbedding, Error>?,
+                                 voicedSampleCount: Int) async -> SpeakerDecision {
+        guard let embedTask else {
+            return voicedSampleCount < Self.minVoicedSamplesForGate ? .tooShort : .notEnrolled
+        }
+        do {
+            let embedding = try await embedTask.value
+            let threshold = settings.settings.speakerSensitivity.acceptThreshold
+            return speakerVerifier.decide(utterance: embedding, profile: speakerProfile, threshold: threshold)
+        } catch {
+            BarkLog.pipeline.debug("speaker embed failed; injecting (fail-open): \(String(describing: error), privacy: .public)")
+            return .notEnrolled
+        }
+    }
+
     public func toggleHandsFree() {
         handsFreeActive ? stopHandsFree() : startHandsFree()
     }
@@ -745,6 +843,7 @@ public final class DictationController {
         var capturedFrames = 0
         let maxUtteranceFrames = 300   // ~30 s safety cap (never-ending speech/noise)
         var meter = LevelMeter()
+        var utteranceSamples: [Float] = []   // raw audio for the speaker gate (011); bounded by maxUtteranceFrames
 
         for await frames in stream {
             guard handsFreeActive, !Task.isCancelled else { break }
@@ -766,7 +865,7 @@ public final class DictationController {
                     resultConsumer = Task { @MainActor [weak self] in
                         do { for try await r in results { self?.apply(r) } } catch {}
                     }
-                    for f in preroll { await stt.feed(f) }
+                    for f in preroll { await stt.feed(f); utteranceSamples.append(contentsOf: f.samples) }
                     preroll.removeAll()
                     capturing = true
                     capturedFrames = 0
@@ -778,6 +877,7 @@ public final class DictationController {
                 }
             } else {
                 await stt.feed(frames)
+                utteranceSamples.append(contentsOf: frames.samples)
                 capturedFrames += 1
                 // Finalize on silence, or force-finalize at the safety cap.
                 guard event == .speechEnded || capturedFrames >= maxUtteranceFrames else { continue }
@@ -788,21 +888,44 @@ public final class DictationController {
                 resultConsumer = nil
                 capturing = false
 
+                // Snapshot the utterance audio and start its speaker embedding now,
+                // so the ANE pass overlaps cleanup (SC-004). Clear the buffer for the
+                // next utterance regardless of outcome.
+                let gateSamples = utteranceSamples
+                let embedTask = speakerEmbedTaskIfGated(gateSamples)
+                utteranceSamples = []
+
                 let transcript = (finalSegments.joined(separator: " ") + " " + volatileTail)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if transcript.isEmpty {
+                    embedTask?.cancel()
                     machine.handle(.reset); phase = machine.phase
                 } else {
                     let mode = effectiveMode()
                     machine.handle(.transcriptFinalized); phase = machine.phase
                     let cleaned = await produceText(transcript, mode: mode)
                     // Toggled off (or cancelled) during cleanup → do NOT inject (Codex).
-                    guard handsFreeActive, !Task.isCancelled else { break }
-                    // Per-utterance: an injection refusal must NOT kill the session (ADV-001).
-                    do {
-                        try await performInjection(cleaned, transcript: transcript, mode: mode)
-                    } catch {
-                        lastError = Self.injectionMessage(error)
+                    guard handsFreeActive, !Task.isCancelled else { embedTask?.cancel(); break }
+
+                    // Speaker gate (011): suppress only on an explicit reject/borderline;
+                    // every other outcome injects (fail-open, FR-009).
+                    let decision = await speakerDecision(embedTask, voicedSampleCount: gateSamples.count)
+                    if decision.allowsInjection {
+                        // Per-utterance: an injection refusal must NOT kill the session (ADV-001).
+                        do {
+                            try await performInjection(cleaned, transcript: transcript, mode: mode)
+                        } catch {
+                            lastError = Self.injectionMessage(error)
+                            machine.handle(.reset); phase = machine.phase
+                        }
+                    } else {
+                        // A different speaker. Decline silently: inject nothing, play a
+                        // faint cue distinct from success, and keep listening — this is
+                        // NOT an error and must not tear down the session (FR-007/FR-014).
+                        if case .borderline(let s) = decision {
+                            BarkLog.pipeline.debug("speaker gate borderline (score \(s, privacy: .public))")
+                        }
+                        if soundFeedback { Feedback.declined() }
                         machine.handle(.reset); phase = machine.phase
                     }
                 }

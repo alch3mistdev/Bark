@@ -51,6 +51,8 @@ public struct Settings: Codable, Sendable, Equatable {
     public var hotkey: HotkeySetting
     public var handsFreeHotkey: HotkeySetting
     public var vadSensitivity: VADSensitivity
+    public var speakerGateEnabled: Bool
+    public var speakerSensitivity: SpeakerVerificationSensitivity
     public var launchAtLogin: Bool
     public var historyEnabled: Bool
     public var llmEnabled: Bool
@@ -69,6 +71,8 @@ public struct Settings: Codable, Sendable, Equatable {
         hotkey: HotkeySetting = .default,
         handsFreeHotkey: HotkeySetting = HotkeySetting(kind: .keyToggle, keyCode: 96, modifierFlags: 0),
         vadSensitivity: VADSensitivity = .medium,
+        speakerGateEnabled: Bool = false,   // opt-in, like historyEnabled/llmEnabled
+        speakerSensitivity: SpeakerVerificationSensitivity = .medium,
         launchAtLogin: Bool = false,
         historyEnabled: Bool = false,
         llmEnabled: Bool = false,   // opt-in: enabling triggers the ~2.5 GB model download (consent)
@@ -86,6 +90,8 @@ public struct Settings: Codable, Sendable, Equatable {
         self.hotkey = hotkey
         self.handsFreeHotkey = handsFreeHotkey
         self.vadSensitivity = vadSensitivity
+        self.speakerGateEnabled = speakerGateEnabled
+        self.speakerSensitivity = speakerSensitivity
         self.launchAtLogin = launchAtLogin
         self.historyEnabled = historyEnabled
         self.llmEnabled = llmEnabled
@@ -110,6 +116,8 @@ public struct Settings: Codable, Sendable, Equatable {
         hotkey = try c.decodeIfPresent(HotkeySetting.self, forKey: .hotkey) ?? d.hotkey
         handsFreeHotkey = try c.decodeIfPresent(HotkeySetting.self, forKey: .handsFreeHotkey) ?? d.handsFreeHotkey
         vadSensitivity = try c.decodeIfPresent(VADSensitivity.self, forKey: .vadSensitivity) ?? d.vadSensitivity
+        speakerGateEnabled = try c.decodeIfPresent(Bool.self, forKey: .speakerGateEnabled) ?? d.speakerGateEnabled
+        speakerSensitivity = try c.decodeIfPresent(SpeakerVerificationSensitivity.self, forKey: .speakerSensitivity) ?? d.speakerSensitivity
         launchAtLogin = try c.decodeIfPresent(Bool.self, forKey: .launchAtLogin) ?? d.launchAtLogin
         historyEnabled = try c.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? d.historyEnabled
         llmEnabled = try c.decodeIfPresent(Bool.self, forKey: .llmEnabled) ?? d.llmEnabled
