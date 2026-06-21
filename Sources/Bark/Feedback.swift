@@ -8,6 +8,10 @@ enum Feedback {
     @MainActor static func started() { play("Tink") }
     @MainActor static func inserted() { play("Pop") }
 
+    /// Faint, non-intrusive cue when the speaker gate declines a non-matching
+    /// voice — deliberately distinct from the "inserted" success sound (FR-007).
+    @MainActor static func declined() { play("Morse") }
+
     @MainActor private static func play(_ name: String) {
         NSSound(named: NSSound.Name(name))?.play()
     }

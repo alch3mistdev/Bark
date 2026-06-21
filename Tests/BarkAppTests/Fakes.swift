@@ -145,6 +145,37 @@ final class FakePreparingCleaner: TextCleaner, @unchecked Sendable {
     }
 }
 
+/// Speaker embedder that returns a fixed embedding or throws — drives the
+/// speaker-gate tests without any FluidAudio dependency (lean test build).
+final class FakeSpeakerEmbedder: SpeakerEmbedder, @unchecked Sendable {
+    enum Result { case embedding(SpeakerEmbedding), failure }
+    private let result: Result
+    let modelID: String
+    private(set) var callCount = 0
+
+    init(_ result: Result, modelID: String = "fake-embedder") {
+        self.result = result
+        self.modelID = modelID
+    }
+
+    func embed(_ samples: [Float]) async throws -> SpeakerEmbedding {
+        callCount += 1
+        switch result {
+        case .embedding(let e): return e
+        case .failure: throw STTError.engineFailure("fake embedder failure")
+        }
+    }
+}
+
+/// In-memory voiceprint store for tests — no crypto, no Keychain, no disk.
+final class InMemorySpeakerProfileStore: SpeakerProfileStore, @unchecked Sendable {
+    private var profile: SpeakerProfile?
+    init(_ profile: SpeakerProfile? = nil) { self.profile = profile }
+    func load() async -> SpeakerProfile? { profile }
+    func save(_ profile: SpeakerProfile) async throws { self.profile = profile }
+    func delete() async { profile = nil }
+}
+
 /// Injector that records text, or fails a configurable number of times.
 final class FakeInjector: TextInjector, @unchecked Sendable {
     enum FailMode { case none, secure, focusChanged }
