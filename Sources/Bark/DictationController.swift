@@ -732,10 +732,13 @@ public final class DictationController {
     public func loadSpeakerProfile() async {
         let loaded = await speakerProfileStore?.load()
         speakerProfile = loaded
+        // "Enrolled" means the gate can actually use the voiceprint: a profile is
+        // present AND a compatible embedder exists. Without an embedder, or with a
+        // model-incompatible profile, the gate can't run → report not enrolled.
         if let loaded, let embedder = speakerEmbedder {
             speakerEnrolled = loaded.isCompatible(with: embedder.modelID)
         } else {
-            speakerEnrolled = (loaded != nil)
+            speakerEnrolled = false
         }
     }
 

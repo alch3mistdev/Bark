@@ -24,9 +24,10 @@ public actor EncryptedSpeakerProfileStore: SpeakerProfileStore {
                 keyService: String = "com.bark.speaker",
                 account: String = "speaker-key",
                 key: SymmetricKey? = nil) {
-        let base = directory ?? FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Bark", isDirectory: true)
+        let support = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory   // never trap on a missing support dir
+        let base = directory ?? support.appendingPathComponent("Bark", isDirectory: true)
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         self.fileURL = base.appendingPathComponent("speaker.enc")
         self.keyService = keyService
