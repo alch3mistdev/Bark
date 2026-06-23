@@ -60,6 +60,7 @@ public struct Settings: Codable, Sendable, Equatable {
     public var outputRouting: OutputRouting
     public var soundFeedback: Bool
     public var enhancedHUD: Bool
+    public var holdToRefineEnabled: Bool   // 012: opt-in to the hold-to-refine second stage
     public var hasCompletedOnboarding: Bool
 
     public init(
@@ -80,6 +81,7 @@ public struct Settings: Codable, Sendable, Equatable {
         outputRouting: OutputRouting = .insert,
         soundFeedback: Bool = true,
         enhancedHUD: Bool = false,
+        holdToRefineEnabled: Bool = true,   // 012: on by default when an LLM is present (gesture is opt-in by nature)
         hasCompletedOnboarding: Bool = false
     ) {
         self.selectedModeID = selectedModeID
@@ -99,6 +101,7 @@ public struct Settings: Codable, Sendable, Equatable {
         self.outputRouting = outputRouting
         self.soundFeedback = soundFeedback
         self.enhancedHUD = enhancedHUD
+        self.holdToRefineEnabled = holdToRefineEnabled
         self.hasCompletedOnboarding = hasCompletedOnboarding
     }
 
@@ -125,6 +128,7 @@ public struct Settings: Codable, Sendable, Equatable {
         outputRouting = try c.decodeIfPresent(OutputRouting.self, forKey: .outputRouting) ?? d.outputRouting
         soundFeedback = try c.decodeIfPresent(Bool.self, forKey: .soundFeedback) ?? d.soundFeedback
         enhancedHUD = try c.decodeIfPresent(Bool.self, forKey: .enhancedHUD) ?? d.enhancedHUD
+        holdToRefineEnabled = try c.decodeIfPresent(Bool.self, forKey: .holdToRefineEnabled) ?? d.holdToRefineEnabled
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? d.hasCompletedOnboarding
     }
 

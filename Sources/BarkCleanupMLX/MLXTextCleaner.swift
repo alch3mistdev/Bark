@@ -49,6 +49,16 @@ public actor MLXTextCleaner: TextCleaner {
         let session = ChatSession(container, instructions: PromptTemplate.system(for: mode))
         return try await session.respond(to: PromptTemplate.user(transcript: text))
     }
+
+    /// In-session refine (012): apply a spoken instruction to the running draft.
+    /// Fresh, stateless turn; both draft and instruction are fenced as untrusted
+    /// data (`PromptTemplate.refine*`). The caller bounds output length
+    /// (`OutputValidator`) and wraps this in the per-turn deadline.
+    public func refine(_ text: String, instruction: String, mode: Mode) async throws -> String {
+        guard let container else { throw CleanupError.modelUnavailable }
+        let session = ChatSession(container, instructions: PromptTemplate.refineSystem(for: mode))
+        return try await session.respond(to: PromptTemplate.refineUser(draft: text, instruction: instruction))
+    }
 }
 
 #else

@@ -98,6 +98,34 @@ code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the nex
   has bound. The recorder shows a warning, does not refuse (mirrors push-to-talk recorder UX).
   Users can rebind.
 
+## Hold-to-refine surface  (`BarkCore/Refine/*`, `BarkCore/Cleanup/PromptTemplate.swift`, `Sources/Bark/DictationController.swift`, `specs/012-staged-refinement/`)
+- ☑ No new permission and no new network event — reuses the mic + push-to-talk hotkey already granted;
+  refinement runs on the same on-device LLM as the rewrite path. The running draft and per-turn audio
+  are in-memory only and discarded at fn-release.
+- ☑ The spoken **instruction** is fenced as **untrusted data** inside `<instruction>`, and the running
+  draft inside `<text>`, with injected close-tags neutralized and an explicit guardrail
+  (`PromptTemplate.refineSystem` / `refineUser`). Mirrors SEC-010 for the new surface. (FR-013)
+- ☑ Refine output passes `OutputValidator` (length-bound vs the prior draft) and is text only; on
+  reject / timeout / error the **prior draft is preserved** (`RefineSession.keepOnFailure`) — a bad
+  rewrite never destroys text. (FR-010 / SC-006)
+- ☑ Injection happens **only at fn-release**, through the unchanged `performInjection` path: secure-field
+  refusal, focus-guard PID re-check, `TextSanitizer`, never Return/Enter. Intermediate drafts and the
+  empty-tap **undo** never inject. (FR-006 / FR-014)
+- ☑ Fresh stateless LLM session per turn — no conversation state bleeds across turns or dictations.
+- ☑ Gated behind an opt-in setting + LLM availability; the lean build and toggle-off collapse to the
+  unchanged base path (fail-open). (FR-011 / FR-017)
+- **Residual (L-8 — Spoken instruction as injection vector):** as with the revision surface, the
+  instruction could attempt prompt injection. Mitigated by the fence + `OutputValidator`; worst case is
+  a refused rewrite with the prior draft preserved.
+- **Residual (left-option keycode delivery):** left-vs-right option (keycode 58 vs 61) is read from the
+  `.flagsChanged` event — runtime OS behavior that can't be unit-tested; the pure `RefineKeyDecoder` is
+  the tested evidence and right-option never triggers a refine.
+- **Residual (audio during a slow in-flight refine):** while a rewrite is being applied the capture loop
+  is suspended and mic audio buffers (bounded, newest-kept ~6 s). A rewrite approaching the 8 s deadline
+  can drop the earliest buffered audio spoken during it. Not a safety issue (no injection, no leak); the
+  HUD shows "Refining…" to cue the user to wait, and decoupling segment capture from the LLM call is a
+  planned follow-up. (ADV-003)
+
 ## Permissions — least privilege  (`Resources/Bark.entitlements`, `PermissionsCoordinator`)
 - ☑ Only the microphone device entitlement. Accessibility + Input Monitoring are user-granted via TCC,
   requested just-in-time with purpose strings. (SEC-008 / T-011)

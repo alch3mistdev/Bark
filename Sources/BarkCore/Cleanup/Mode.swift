@@ -13,6 +13,10 @@ public struct Mode: Sendable, Identifiable, Equatable, Codable {
     public var symbol: String          // SF Symbol name for the menu
     public var usesLLM: Bool
     public var systemPrompt: String    // instruction for the rewrite; ignored when usesLLM == false
+    /// Per-mode refine/revision prompt for the second stage (012) — shared with
+    /// feature 009. `nil` → the generic refine prompt. Optional + synthesized
+    /// Codable decode it leniently, so older persisted custom modes load fine.
+    public var revisionPrompt: String?
 
     // Deterministic-pass toggles.
     public var stripFillers: Bool
@@ -26,6 +30,7 @@ public struct Mode: Sendable, Identifiable, Equatable, Codable {
         symbol: String = "text.cursor",
         usesLLM: Bool = false,
         systemPrompt: String = "",
+        revisionPrompt: String? = nil,
         stripFillers: Bool = true,
         smartCapitalize: Bool = true,
         applySpokenPunctuation: Bool = true,
@@ -36,6 +41,7 @@ public struct Mode: Sendable, Identifiable, Equatable, Codable {
         self.symbol = symbol
         self.usesLLM = usesLLM
         self.systemPrompt = systemPrompt
+        self.revisionPrompt = revisionPrompt
         self.stripFillers = stripFillers
         self.smartCapitalize = smartCapitalize
         self.applySpokenPunctuation = applySpokenPunctuation
@@ -63,7 +69,9 @@ public extension Mode {
         usesLLM: true,
         systemPrompt: "Rewrite the dictated text as a clear, well-punctuated email body. "
             + "Keep the author's meaning and facts exactly; do not add greetings, sign-offs, or invented details. "
-            + "Fix grammar and structure into proper sentences and paragraphs."
+            + "Fix grammar and structure into proper sentences and paragraphs.",
+        revisionPrompt: "Apply the user's instruction while keeping an email register: "
+            + "professional and concise; no greetings or sign-offs."
     )
 
     static let message = Mode(
@@ -78,6 +86,8 @@ public extension Mode {
         usesLLM: true,
         systemPrompt: "Rewrite the dictated text as a clear, terse engineering note (code comment or commit message). "
             + "Preserve all technical terms, identifiers, and symbols verbatim. Imperative mood. Do not add content.",
+        revisionPrompt: "Apply the user's instruction while preserving code identifiers and symbols "
+            + "exactly; imperative and terse.",
         smartCapitalize: false
     )
 

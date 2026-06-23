@@ -15,6 +15,11 @@ public protocol TextCleaner: Sendable {
     /// Produce the cleaned text. Must be faithful: never invent content.
     func clean(_ text: String, mode: Mode) async throws -> String
 
+    /// Apply a spoken `instruction` to `text` under `mode` (012 hold-to-refine).
+    /// Only LLM-backed cleaners refine; the default declines so deterministic
+    /// cleaners (and the lean build) have no second stage.
+    func refine(_ text: String, instruction: String, mode: Mode) async throws -> String
+
     /// Progressive variant for live UI. Default implementation yields the
     /// single `clean(_:mode:)` result.
     func cleanStream(_ text: String, mode: Mode) -> AsyncThrowingStream<String, Error>
@@ -23,6 +28,11 @@ public protocol TextCleaner: Sendable {
 public extension TextCleaner {
     /// Default: nothing to load.
     func prepare(progress: @escaping @Sendable (Double) -> Void) async throws {}
+
+    /// Default: this cleaner cannot refine (only the LLM cleaner overrides this).
+    func refine(_ text: String, instruction: String, mode: Mode) async throws -> String {
+        throw CleanupError.modelUnavailable
+    }
 
     func cleanStream(_ text: String, mode: Mode) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in

@@ -64,6 +64,10 @@ On first launch macOS will ask for three permissions (each requested just-in-tim
 
 - **Hold `fn` (Globe)** to talk; release to insert. (Push-to-talk is the default; toggle mode and a
   custom key are supported in `HotkeyConfig`.)
+- **Hold-to-refine** (needs the LLM) — while still holding `fn`, **hold the left `⌥` (option)** key and
+  speak an instruction (e.g. *"make it more formal"*, *"change the name to Bar"*) to rewrite your text
+  before it's inserted. Release option to apply; repeat to refine further; an **empty tap** undoes the
+  last change. Release `fn` to insert the final result. Toggle it in **Settings ▸ Cleanup**.
 - Pick a **Mode** from the menu bar: `Raw` · `Clean` · `Email` · `Message` · `Code / Commit` · `List`.
 - `Raw`/`Clean` are instant. The LLM modes rewrite and insert once (sub-second to ~1.5 s).
 - **Per-app auto-mode** — map apps to modes in **Settings ▸ Per-app modes** (e.g. Terminal→Raw,
@@ -74,18 +78,22 @@ On first launch macOS will ask for three permissions (each requested just-in-tim
 - **Re-use a past dictation** (needs history on) — the menu bar's **Re-insert recent** types a saved
   result into the app you're in; **Settings ▸ History** has a search box + per-row **Copy**.
 
-## Enable on-device LLM rewrite (MLX)
+## On-device LLM rewrite (MLX) — built in by default
 
-The default build is dependency-free and uses the deterministic cleaner for every mode. To turn on the
-**Qwen3-4B** rewrite engine for the LLM modes:
+The default build includes the **Qwen3-4B** rewrite engine, so the LLM modes use it out of the box. The
+manifest pulls `mlx-swift-lm` + `swift-transformers` + `swift-huggingface`, and the first `swift build`
+compiles MLX/Metal — takes a while. The model (~2.5–3 GB) downloads from Hugging Face on first use, then
+runs fully offline.
+
+Prefer the lean, dependency-free, fully-offline build (the deterministic cleaner for every mode)?
 
 ```bash
-cp Package-mlx.swift Package.swift     # adds mlx-swift-lm + swift-transformers + swift-huggingface
-swift build -c release                 # first build compiles MLX/Metal — takes a while
+cp Package-lean.swift Package.swift    # drops the MLX deps; LLM modes fall back to the deterministic cleaner
+swift build -c release
+git checkout Package.swift             # restore the default (LLM rewrite included)
 ```
 
-The model (~2.5–3 GB) downloads from Hugging Face on first use, then runs fully offline. Revert with
-`git checkout Package.swift`. (Both manifests are verified to build.)
+(Both manifests are verified to build.)
 
 ## Alternative STT backends (optional)
 
@@ -97,7 +105,7 @@ and fully offline:
 ```bash
 cp Package-stt-extras.swift Package.swift   # adds WhisperKit + FluidAudio; sets WHISPERKIT / FLUIDAUDIO flags
 swift build -c release
-git checkout Package.swift                   # revert to the lean, dependency-free default
+git checkout Package.swift                   # revert to the default build (LLM rewrite included)
 ```
 
 Without those flags the engines compile to thin stubs, so a stale setting can never brick the app —
@@ -149,7 +157,7 @@ Bark (SwiftUI MenuBarExtra)
  │   ├─ ClipboardInjector ...... copy-to-clipboard output routing (secure-field-guarded)
  │   ├─ FocusProbe ............. frontmost target + best-effort caret rect (HUD anchor)
  │   └─ PermissionsCoordinator . mic / Accessibility / Input Monitoring TCC
- ├─ BarkCleanupMLX ............. optional Qwen3-4B rewrite (MLX) — stubbed out by default
+ ├─ BarkCleanupMLX ............. Qwen3-4B rewrite (MLX) — built in by default (stub in the lean build)
  └─ BarkCore ................... pure, dependency-free, fully unit-tested
      ├─ AudioRingBuffer (SPSC)  ├─ TextSanitizer       ├─ BasicTextCleaner
      ├─ Mode / ModeRegistry     ├─ PromptTemplate      ├─ SecureFieldPolicy
@@ -201,8 +209,9 @@ deterministic cleaner, settings persistence, launch-at-login, encrypted opt-in h
 and `.app`/DMG packaging. Shipped workflow features: **per-app auto-mode**, **output routing**
 (copy-to-clipboard), **history search + re-insert**, an opt-in **enhanced overlay with mic-level
 meter**, and **pluggable STT backends** (Apple default; WhisperKit/Parakeet opt-in) with a
-SHA-256-verified model cache + Models pane. The MLX LLM engine is verified to compile/link via
-`Package-mlx.swift`.
+SHA-256-verified model cache + Models pane. The MLX LLM rewrite engine is **built in by default** (the
+lean, dependency-free build via `Package-lean.swift` stubs it out and falls back to the deterministic
+cleaner).
 
 What the tests cover: pure decision logic (sanitizer, secure-field policy, terminal detection,
 focus-guard, ring buffer, modes/prompt templates, state machine, settings codec, retention) **and**

@@ -32,6 +32,12 @@ public final class DictationController {
     public private(set) var inputLevel: Float = 0    // 0...1 smoothed mic level for the HUD meter
     public private(set) var speakerEnrolled = false  // a usable voiceprint is loaded (011)
 
+    // Hold-to-refine (012). The evolving draft + activity drive the HUD; injection
+    // happens only at fn-release. `refineHint` carries the one-time "needs LLM" note.
+    public private(set) var currentDraft: String = ""
+    public private(set) var refineActivity: RefineActivity = .none
+    public private(set) var refineHint: String?
+
     /// Side-channel callbacks wired by the app layer (AppKit windows/HUD).
     public var onPhaseChange: (@MainActor (DictationPhase) -> Void)?
     public var onOpenSettings: (@MainActor () -> Void)?
@@ -69,6 +75,16 @@ public final class DictationController {
     private var handsFreeTask: Task<Void, Never>?
     private var handsFreeAudio: AudioCapturing?
     private var speakerProfile: SpeakerProfile?   // enrolled voiceprint, loaded on activate (011)
+
+    // Hold-to-refine (012) session state — all MainActor-confined.
+    private var refine = RefineSession()
+    private var refineSignals: [RefineBoundary] = []   // queued left-option boundaries, drained by the loop
+    private var refineRawTranscript = ""               // raw dictation, for the history record
+    private var ptTask: Task<Void, Never>?             // the push-to-talk capture loop
+    private var sessionCancelled = false               // set by cancelDictation so the loop skips injection
+    private var refineHintShown = false                // in-memory, session-scoped (not persisted)
+
+    private enum RefineBoundary { case start, end }
 
     /// ≥1.0 s of voiced audio at 16 kHz — below this an utterance is `.tooShort`
     /// to judge and is injected (fail-open). Matches FluidAudio's minSpeechDuration.
@@ -200,6 +216,27 @@ public final class DictationController {
 
     /// True when the LLM engine is compiled into this build (MLX build).
     public var llmEnginePresent: Bool { llmCleaner != nil }
+
+    // MARK: - Hold-to-refine (012)
+
+    public var holdToRefineEnabled: Bool {
+        get { settings.settings.holdToRefineEnabled }
+        set { settings.update { $0.holdToRefineEnabled = newValue } }
+    }
+
+    /// The second stage is live only with the toggle on, the LLM engine present,
+    /// and the LLM enabled. Otherwise the left-option gesture is ignored and all
+    /// speech stays dictation (FR-011/FR-017). A failed/not-ready turn still fails
+    /// open (keeps the prior draft) per FR-010.
+    private var refineEngaged: Bool {
+        settings.settings.holdToRefineEnabled && llmEnginePresent && settings.settings.llmEnabled
+    }
+
+    private func showRefineHintIfNeeded() {
+        guard !refineHintShown else { return }
+        refineHintShown = true
+        refineHint = "Refinement needs the LLM rewrite turned on."
+    }
 
     /// Download (first run) + load the rewrite model, updating `llmStatus`. The
     /// per-utterance deadline never wraps this — it's a separate, observable step.
@@ -392,6 +429,14 @@ public final class DictationController {
         hotkey.onStop = { [weak self] in
             Task { @MainActor in self?.stopDictation() }
         }
+        // 012: left-option while fn held opens/closes a refine turn. Bound only to
+        // the push-to-talk hotkey — hands-free/toggle never get a second stage (FR-015).
+        hotkey.onRefineStart = { [weak self] in
+            Task { @MainActor in self?.handleRefineBoundary(.start) }
+        }
+        hotkey.onRefineEnd = { [weak self] in
+            Task { @MainActor in self?.handleRefineBoundary(.end) }
+        }
         hotkey.start()
 
         // Hands-free toggle (second hotkey): each press toggles continuous, VAD-gated dictation.
@@ -415,6 +460,7 @@ public final class DictationController {
         handsFreeHotkey.stop()
         feedTask?.cancel()
         resultTask?.cancel()
+        ptTask?.cancel()
         llmTask?.cancel()
         handsFreeTask?.cancel()
         audio?.stop()
@@ -464,78 +510,207 @@ public final class DictationController {
         finalSegments = []
         volatileTail = ""
         liveText = ""
+        // Reset hold-to-refine session state (012).
+        refine = RefineSession()
+        refineSignals = []
+        refineRawTranscript = ""
+        currentDraft = ""
+        refineActivity = .dictating
+        refineHint = nil
+        sessionCancelled = false
         guard machine.handle(.startPressed) else { return }   // refuse if not a legal start
         phase = machine.phase
 
         let engine = audioFactory()
         self.audio = engine
-        Task { await beginPipeline(engine: engine) }
-    }
-
-    private func beginPipeline(engine: AudioCapturing) async {
-        // The user may have released/stopped during the async setup gap.
-        guard machine.phase == .listening else { engine.stop(); return }
-        do {
-            let sttStream = try await stt.beginStream()
-            guard machine.phase == .listening else { engine.stop(); await stt.cancel(); return }
-            if soundFeedback { Feedback.started() }   // pre-roll BEFORE the mic opens (no bleed)
-            let audioStream = try engine.start()
-            machine.handle(.audioStarted)
-
-            feedTask = Task { [stt, weak self] in
-                var meter = LevelMeter()
-                for await frames in audioStream {
-                    await stt.feed(frames)
-                    let level = meter.update(rms: VoiceActivityDetector.rms(frames.samples))
-                    self?.setInputLevel(level)
-                }
-                self?.setInputLevel(0)
-            }
-            resultTask = Task { @MainActor [weak self] in
-                do {
-                    for try await result in sttStream {
-                        self?.apply(result)
-                    }
-                } catch {
-                    self?.fail(Self.describe(error))
-                }
-            }
-        } catch {
-            fail(Self.describe(error))
-        }
+        ptTask = Task { await runPushToTalk(engine: engine) }
     }
 
     public func stopDictation() {
         guard machine.phase == .listening else { return }
-        machine.handle(.stopPressed)
+        machine.handle(.stopPressed)   // → transcribing; the loop finalizes + injects
         phase = machine.phase
-        Task { await finishPipeline() }
+        audio?.stop()                  // ends the audio stream → runPushToTalk exits its loop
     }
 
-    private func finishPipeline() async {
-        audio?.stop()                 // ends audioStream → feedTask completes
-        await feedTask?.value
-        do {
-            try await stt.finishStream()
-        } catch {
-            BarkLog.stt.error("finishStream: \(String(describing: error), privacy: .public)")
+    /// Single-mic, multi-segment push-to-talk capture (012). The mic stays open for
+    /// the whole fn hold; STT streams cycle at each left-option boundary so the base,
+    /// each instruction, and inter-refinement dictation are separate segments. With
+    /// no left-option press the session is a single segment whose injected text is
+    /// identical to the pre-012 path (SC-002/SC-003). Modeled on `runHandsFree`.
+    private func runPushToTalk(engine: AudioCapturing) async {
+        let mode = effectiveMode()
+        var meter = LevelMeter()
+        var resultConsumer: Task<Void, Never>?
+
+        func beginSegment() async -> Bool {
+            finalSegments = []; volatileTail = ""; liveText = ""
+            do {
+                let results = try await stt.beginStream()
+                resultConsumer = Task { @MainActor [weak self] in
+                    do { for try await r in results { self?.apply(r) } }
+                    catch { BarkLog.stt.error("refine segment STT stream: \(String(describing: error), privacy: .public)") }
+                }
+                return true
+            } catch {
+                fail(Self.describe(error)); return false
+            }
         }
-        await resultTask?.value
+        func endSegment() async -> String {
+            try? await stt.finishStream()
+            await resultConsumer?.value
+            resultConsumer = nil
+            let text = (finalSegments.joined(separator: " ") + " " + volatileTail)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            finalSegments = []; volatileTail = ""; liveText = ""
+            return text
+        }
 
-        let transcript = (finalSegments.joined(separator: " ") + " " + volatileTail)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        machine.handle(.transcriptFinalized)
-        phase = machine.phase
+        guard await beginSegment() else { return }
+        if soundFeedback { Feedback.started() }   // pre-roll BEFORE the mic opens (no bleed)
 
-        guard !transcript.isEmpty else {
-            BarkLog.pipeline.info("empty transcript — nothing to inject")
+        let audioStream: AsyncStream<AudioFrames>
+        do { audioStream = try engine.start() }
+        catch { fail(Self.describe(error)); return }
+        machine.handle(.audioStarted)
+        // stop() may have raced ahead of start(); close the fresh stream so we finalize.
+        if machine.phase != .listening { engine.stop() }
+
+        // Process one queued left-option boundary; returns false if the next
+        // segment couldn't be opened (the loop must then abort).
+        func handleBoundary(_ boundary: RefineBoundary) async -> Bool {
+            switch boundary {
+            case .start:
+                let chunk = await endSegment()
+                await appendDictation(chunk, mode: mode)   // closes/seeds the base on the first turn
+                refine.beginInstruction()
+                refineActivity = .capturingInstruction
+            case .end:
+                let instruction = await endSegment()
+                await runRefineTurn(instruction: instruction, mode: mode)
+            }
+            return await beginSegment()
+        }
+
+        for await frames in audioStream {
+            if Task.isCancelled { break }
+            inputLevel = meter.update(rms: VoiceActivityDetector.rms(frames.samples))
+
+            // Drain any left-option boundaries queued by the hotkey callbacks.
+            while !refineSignals.isEmpty {
+                guard await handleBoundary(refineSignals.removeFirst()) else { return }
+            }
+            await stt.feed(frames)
+        }
+
+        // fn-up (audio stopped). Drain any boundary queued in the last instant
+        // before release (e.g. a final undo) so it is not lost (ADV-004).
+        while !refineSignals.isEmpty {
+            guard await handleBoundary(refineSignals.removeFirst()) else { return }
+        }
+
+        // Finalize the last segment, then inject the draft.
+        let tail = await endSegment()
+        if sessionCancelled || Task.isCancelled { clearRefineState(); return }
+        if refine.context == .instruction {
+            await runRefineTurn(instruction: tail, mode: mode)   // fn released while option held → flush
+        } else {
+            await appendDictation(tail, mode: mode)
+        }
+        await finalizeAndInject(mode: mode)
+    }
+
+    /// Mode-clean a dictation chunk and append it to the running draft. The first
+    /// non-empty chunk seeds the base draft = selected-mode output (FR-004); later
+    /// chunks are inter-refinement dictation (FR-005).
+    private func appendDictation(_ chunk: String, mode: Mode) async {
+        let raw = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return }
+        refineRawTranscript = refineRawTranscript.isEmpty ? raw : refineRawTranscript + " " + raw
+        let produced = await produceText(raw, mode: mode)
+        refine.appendDictation(produced)
+        currentDraft = refine.draft
+    }
+
+    /// Apply one instruction to the running draft (or undo on an empty instruction).
+    /// Serialized by construction: the capture loop awaits this before the next
+    /// segment, so turns apply FIFO, each on the prior result (FR-003/FR-008).
+    private func runRefineTurn(instruction: String, mode: Mode) async {
+        let instr = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        if instr.isEmpty {
+            refine.undo()                       // empty turn = one-step undo (FR-007); never injects
+            currentDraft = refine.draft
+            refineActivity = .dictating
+            return
+        }
+        refineActivity = .refining
+        let before = refine.draft
+        guard let llm = llmCleaner, await llm.isAvailable else {
+            // Engine present but the model isn't loaded yet: don't lose the speech —
+            // treat the instruction as dictation (FR-011) and warm the model so the
+            // next turn can refine. (ADV-001)
+            refine.keepOnFailure()
+            await appendDictation(instr, mode: mode)
+            prepareLLM()
+            refineActivity = .dictating
+            return
+        }
+        do {
+            let rewritten = try await withThrowingDeadline(seconds: cleanupDeadline) {
+                try await llm.refine(before, instruction: instr, mode: mode)
+            }
+            let validated = try OutputValidator.validate(rewritten, against: before)
+            refine.applyRefine(rewrite: validated)
+        } catch {
+            BarkLog.cleanup.error("refine failed, keeping draft: \(String(describing: error), privacy: .public)")
+            refine.keepOnFailure()              // error/timeout/invalid → keep prior draft (FR-010)
+            if soundFeedback { Feedback.declined() }
+        }
+        currentDraft = refine.draft
+        refineActivity = .dictating
+    }
+
+    /// Inject the final draft — only here, only at fn-release — through the unchanged
+    /// safe-injection path (FR-006/FR-014). Intermediate drafts never reach this.
+    private func finalizeAndInject(mode: Mode) async {
+        if sessionCancelled || Task.isCancelled { clearRefineState(); return }   // don't inject post-cancel (ADV-006)
+        refineActivity = .none
+        let draft = refine.draft
+        let transcript = refineRawTranscript
+        currentDraft = ""
+        guard !draft.isEmpty else {
+            BarkLog.pipeline.info("empty draft — nothing to inject")
             reset()
             return
         }
+        machine.handle(.transcriptFinalized)   // transcribing → injecting (no-op if produceText already advanced it)
+        phase = machine.phase
+        await inject(draft, transcript: transcript, mode: mode)
+    }
 
-        let mode = effectiveMode()
-        let cleaned = await produceText(transcript, mode: mode)
-        await inject(cleaned, transcript: transcript, mode: mode)
+    /// Programmatic refine-gesture entry points (driven by the hotkey callbacks;
+    /// also the seam used by tests/automation). Subject to the same gating as the
+    /// live gesture.
+    func beginRefineGesture() { handleRefineBoundary(.start) }
+    func endRefineGesture() { handleRefineBoundary(.end) }
+
+    /// Queue a left-option boundary for the capture loop. Ignored unless a
+    /// push-to-talk hold is live and the second stage is engaged (FR-011/FR-015).
+    private func handleRefineBoundary(_ boundary: RefineBoundary) {
+        guard machine.phase == .listening, !handsFreeActive else { return }
+        guard refineEngaged else {
+            if boundary == .start { showRefineHintIfNeeded() }
+            return
+        }
+        refineSignals.append(boundary)
+    }
+
+    private func clearRefineState() {
+        refine = RefineSession()
+        refineSignals = []
+        refineRawTranscript = ""
+        currentDraft = ""
+        refineActivity = .none
     }
 
     // MARK: - Cleanup
@@ -664,23 +839,28 @@ public final class DictationController {
         capturedTarget = nil   // don't let a dead session's target bleed into per-app mode (ADV-003)
         inputLevel = 0
         Task { await stt.cancel() }
+        clearRefineState()
     }
 
     private func reset() {
         feedTask = nil; resultTask = nil
+        ptTask = nil
         audio = nil
         capturedTarget = nil   // effectiveMode falls back to the manual selection until the next start (ADV-003)
         machine.handle(.reset)
         phase = machine.phase
         liveText = ""
         inputLevel = 0
+        clearRefineState()
     }
 
     /// Stop a live session immediately (e.g. user rebinds the hotkey mid-dictation).
     public func cancelDictation() {
         guard machine.isActive else { return }
+        sessionCancelled = true           // tells runPushToTalk to skip injection
         feedTask?.cancel(); resultTask?.cancel()
         feedTask = nil; resultTask = nil
+        ptTask?.cancel()
         audio?.stop(); audio = nil
         capturedTarget = nil   // (ADV-003)
         inputLevel = 0
@@ -688,6 +868,7 @@ public final class DictationController {
         machine.handle(.reset)
         phase = machine.phase
         liveText = ""
+        clearRefineState()
     }
 
     // MARK: - Hands-free (voice-activated) dictation

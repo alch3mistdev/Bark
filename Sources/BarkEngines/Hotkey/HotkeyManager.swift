@@ -22,6 +22,10 @@ public struct HotkeyConfig: Sendable, Equatable {
 public final class HotkeyManager: @unchecked Sendable {
     public var onStart: (@Sendable () -> Void)?
     public var onStop: (@Sendable () -> Void)?
+    /// 012: left-option pressed/released while a push-to-talk hold is active.
+    /// Only fired for `modifierHold` triggers; never for hands-free/toggle.
+    public var onRefineStart: (@Sendable () -> Void)?
+    public var onRefineEnd: (@Sendable () -> Void)?
 
     private var config: HotkeyConfig
     private var tap: CFMachPort?
@@ -31,7 +35,8 @@ public final class HotkeyManager: @unchecked Sendable {
 
     private var holding = false   // push-to-talk currently held
     private var toggled = false   // toggle currently on
-    private let stateLock = NSLock()  // guards config/holding/toggled across UI ↔ tap thread
+    private var auxHeld = false   // 012: left-option refine turn currently open
+    private let stateLock = NSLock()  // guards config/holding/toggled/auxHeld across UI ↔ tap thread
 
     public init(config: HotkeyConfig = .init()) {
         self.config = config
@@ -43,6 +48,7 @@ public final class HotkeyManager: @unchecked Sendable {
         self.config = config
         holding = false
         toggled = false
+        auxHeld = false
     }
 
     public func start() {
@@ -66,6 +72,7 @@ public final class HotkeyManager: @unchecked Sendable {
         thread = nil
         holding = false
         toggled = false
+        auxHeld = false
     }
 
     // MARK: - Tap thread
@@ -117,7 +124,19 @@ public final class HotkeyManager: @unchecked Sendable {
                 onStart?()
             } else if !on && holding {
                 holding = false
+                auxHeld = false   // fn released — the controller's finalize flushes any open instruction
                 onStop?()
+            }
+            // 012: left-option (keycode 58) opens/closes a refine turn while the
+            // push-to-talk modifier is held. Right option (61) and option-without-fn
+            // are ignored by the pure decoder. Never consume.
+            let keycode = event.getIntegerValueField(.keyboardEventKeycode)
+            let alternateOn = event.flags.contains(.maskAlternate)
+            switch RefineKeyDecoder.decide(alternateOn: alternateOn, keycode: keycode,
+                                           fnHeld: holding, auxHeld: auxHeld) {
+            case .refineStart: auxHeld = true;  onRefineStart?()
+            case .refineEnd:   auxHeld = false; onRefineEnd?()
+            case nil: break
             }
             return false  // never consume modifier events (system-wide)
 
