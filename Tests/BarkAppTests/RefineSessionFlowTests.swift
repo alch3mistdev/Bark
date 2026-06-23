@@ -190,6 +190,20 @@ final class RefineSessionFlowTests: XCTestCase {
         XCTAssertNotNil(c.lastError)
     }
 
+    // Regression — a quick fn tap (no speech) must reset cleanly, never freeze at
+    // "transcribing" (the zero-input finalize hang).
+    func testQuickTapResetsCleanlyNoFreeze() async {
+        let injector = FakeInjector()
+        let c = make(segments: [""], injector: injector)
+        await c.warmModel()
+        c.startDictation()
+        c.stopDictation()                 // immediate release, no audio captured
+        await waitTerminal(c)
+        XCTAssertEqual(injector.count, 0)
+        switch c.phase { case .idle, .completed: break; default: XCTFail("stuck at \(c.phase)") }
+        XCTAssertEqual(c.refineActivity, .none)
+    }
+
     // FR-015 — hands-free ignores the left-option gesture (push-to-talk only)
     func testHandsFreeIgnoresRefineGesture() async {
         let injector = FakeInjector()

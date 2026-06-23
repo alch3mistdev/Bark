@@ -557,7 +557,15 @@ public final class DictationController {
             }
         }
         func endSegment() async -> String {
-            try? await stt.finishStream()
+            // Never hang on an abnormal / zero-input finalize: bound finishStream and
+            // force a teardown via cancel() if it stalls. A quick fn tap feeds the
+            // analyzer no audio, and SpeechAnalyzer.finalizeAndFinishThroughEndOfInput
+            // can then never complete (would freeze the session at "transcribing").
+            do {
+                try await withThrowingDeadline(seconds: 5) { [stt] in try await stt.finishStream() }
+            } catch {
+                await stt.cancel()
+            }
             await resultConsumer?.value
             resultConsumer = nil
             let text = (finalSegments.joined(separator: " ") + " " + volatileTail)
@@ -565,16 +573,28 @@ public final class DictationController {
             finalSegments = []; volatileTail = ""; liveText = ""
             return text
         }
+        // The hold may have ended during the async setup gap (a quick tap). Tear any
+        // partial setup down with cancel() — never finishStream — and reset cleanly.
+        func bailIfStopped() async -> Bool {
+            guard machine.phase != .listening else { return false }
+            engine.stop()
+            await stt.cancel()
+            reset()
+            return true
+        }
 
+        // Mirror the pre-012 guards: never start (or keep) the analyzer + mic for an
+        // already-released hold.
+        if await bailIfStopped() { return }
         guard await beginSegment() else { return }
+        if await bailIfStopped() { return }
         if soundFeedback { Feedback.started() }   // pre-roll BEFORE the mic opens (no bleed)
 
         let audioStream: AsyncStream<AudioFrames>
         do { audioStream = try engine.start() }
         catch { fail(Self.describe(error)); return }
         machine.handle(.audioStarted)
-        // stop() may have raced ahead of start(); close the fresh stream so we finalize.
-        if machine.phase != .listening { engine.stop() }
+        if await bailIfStopped() { return }
 
         // Process one queued left-option boundary; returns false if the next
         // segment couldn't be opened (the loop must then abort).
