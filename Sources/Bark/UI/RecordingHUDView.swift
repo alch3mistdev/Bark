@@ -30,6 +30,22 @@ struct RecordingHUDView: View {
 
     private var accent: Color { controller.phase.isError ? .orange : .accentColor }
 
+    // 012: surface the hold-to-refine state + the evolving draft.
+    private var statusLine: String {
+        switch controller.refineActivity {
+        case .capturingInstruction: return "Listening for instruction…"
+        case .refining: return "Refining…"
+        case .dictating, .none: return title
+        }
+    }
+
+    /// Show the evolving refined draft once a refine session is under way; the
+    /// live partial otherwise.
+    private var bodyText: String {
+        controller.refineActivity != .none && !controller.currentDraft.isEmpty
+            ? controller.currentDraft : controller.liveText
+    }
+
     // MARK: Compact (default)
 
     private var compact: some View {
@@ -40,9 +56,9 @@ struct RecordingHUDView: View {
                 .frame(width: 22)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.caption.weight(.semibold))
-                if !controller.liveText.isEmpty {
-                    Text(controller.liveText)
+                Text(statusLine).font(.caption.weight(.semibold))
+                if !bodyText.isEmpty {
+                    Text(bodyText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -65,17 +81,17 @@ struct RecordingHUDView: View {
                 Image(systemName: controller.phase.menuSymbol)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(accent)
-                Text(title).font(.subheadline.weight(.semibold))
+                Text(statusLine).font(.subheadline.weight(.semibold))
                 Spacer(minLength: 0)
                 LevelBar(level: controller.inputLevel, active: controller.phase.isActive)
                     .frame(width: 96, height: 14)
             }
-            Text(controller.liveText.isEmpty ? "Listening…" : controller.liveText)
+            Text(bodyText.isEmpty ? "Listening…" : bodyText)
                 .font(.system(size: 17, weight: .regular))
-                .foregroundStyle(controller.liveText.isEmpty ? .secondary : .primary)
+                .foregroundStyle(bodyText.isEmpty ? .secondary : .primary)
                 .lineLimit(3)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .animation(.easeOut(duration: 0.12), value: controller.liveText)
+                .animation(.easeOut(duration: 0.12), value: bodyText)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

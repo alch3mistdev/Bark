@@ -211,6 +211,16 @@ private struct GeneralPane: View {
                          + "ready, LLM modes use the instant cleaner.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+
+                Toggle("Enable hold-to-refine (left-option)", isOn: $controller.holdToRefineEnabled)
+                    .disabled(!controller.llmEnginePresent)
+                if controller.llmEnginePresent {
+                    Text("While holding fn to dictate, hold the left-option key and speak an instruction "
+                         + "(e.g. \u{201C}make it more formal\u{201D}) to rewrite the text before it's "
+                         + "inserted. Repeat to refine further; an empty tap undoes the last change. "
+                         + "Needs the LLM rewrite turned on.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
             Section("Output") {
                 Picker("When dictation ends", selection: $controller.outputRouting) {

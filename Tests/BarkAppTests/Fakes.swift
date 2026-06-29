@@ -82,6 +82,100 @@ final class FakeCleaner: TextCleaner, @unchecked Sendable {
         case .hang: try await Task.sleep(for: .seconds(60)); return text
         }
     }
+
+    // 012: refine mirrors `behavior` (a canned rewrite / fail / hang).
+    func refine(_ text: String, instruction: String, mode: Mode) async throws -> String {
+        switch behavior {
+        case .ok(let s): return s
+        case .fail: throw CleanupError.modelUnavailable
+        case .hang: try await Task.sleep(for: .seconds(60)); return text
+        }
+    }
+}
+
+/// 012: STT that yields the next scripted segment text on each `finishStream`,
+/// so the multi-segment refine loop gets distinct base / instruction / tail
+/// transcripts from one open mic.
+final class ScriptedSTTEngine: STTEngine, @unchecked Sendable {
+    private let segments: [String]
+    private var index = 0
+    private var cont: AsyncThrowingStream<STTResult, Error>.Continuation?
+
+    init(segments: [String]) { self.segments = segments }
+
+    func prepare(locale: String) async throws {}
+
+    func beginStream() async throws -> AsyncThrowingStream<STTResult, Error> {
+        let (stream, c) = AsyncThrowingStream<STTResult, Error>.makeStream()
+        cont = c
+        return stream
+    }
+
+    func feed(_ frames: AudioFrames) async {}
+
+    func finishStream() async throws {
+        let text = index < segments.count ? segments[index] : ""
+        index += 1
+        if !text.isEmpty { cont?.yield(STTResult(text: text, isFinal: true)) }
+        cont?.finish()
+        cont = nil
+    }
+
+    func cancel() async { cont?.finish(); cont = nil }
+}
+
+/// 012: cleaner whose `refine` maps (draft, instruction) → output via a closure,
+/// for driving multi-turn refine flow tests. `clean` returns its input.
+final class ScriptedRefineCleaner: TextCleaner, @unchecked Sendable {
+    private let transform: @Sendable (String, String) -> String
+    let available: Bool
+
+    init(available: Bool = true, _ transform: @escaping @Sendable (String, String) -> String) {
+        self.transform = transform
+        self.available = available
+    }
+
+    var isAvailable: Bool { get async { available } }
+    func clean(_ text: String, mode: Mode) async throws -> String { text }
+    func refine(_ text: String, instruction: String, mode: Mode) async throws -> String {
+        transform(text, instruction)
+    }
+}
+
+/// 012: emits frames continuously until stopped, so the refine capture loop keeps
+/// iterating and promptly drains queued left-option boundaries.
+final class ContinuousAudioCapture: AudioCapturing, @unchecked Sendable {
+    private let level: Float
+    private var cont: AsyncStream<AudioFrames>.Continuation?
+    private let running = RunningFlag()
+
+    init(level: Float = 0.2) { self.level = level }
+
+    final class RunningFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = true
+        var isOn: Bool { lock.lock(); defer { lock.unlock() }; return value }
+        func off() { lock.lock(); value = false; lock.unlock() }
+    }
+
+    func start() throws -> AsyncStream<AudioFrames> {
+        let (stream, c) = AsyncStream<AudioFrames>.makeStream()
+        cont = c
+        let level = self.level
+        let running = self.running
+        Task {
+            var i: UInt64 = 0
+            while running.isOn {
+                c.yield(AudioFrames(samples: [Float](repeating: level, count: 1600), sequence: i))
+                i += 1
+                try? await Task.sleep(for: .milliseconds(5))
+            }
+            c.finish()
+        }
+        return stream
+    }
+
+    func stop() { running.off(); cont?.finish(); cont = nil }
 }
 
 /// Emits frames whose RMS equals each scripted level, then stays open until

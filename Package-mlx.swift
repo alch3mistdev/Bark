@@ -1,12 +1,13 @@
 // swift-tools-version: 6.0
-// MLX-ENABLED manifest — opt into on-device LLM rewrite (Qwen3-4B via MLX).
+// MLX-ENABLED manifest — on-device LLM rewrite (Qwen3-4B via MLX).
 //
-//   To enable:   cp Package-mlx.swift Package.swift && swift build -c release
-//   To revert:   git checkout Package.swift   (the lean, offline, dependency-free default)
+// Identical to the default `Package.swift` (the LLM rewrite ships by default). Kept as
+// the canonical "MLX dependencies" manifest: merge these dependencies and `swiftSettings`
+// into `Package-stt-extras.swift` to build the full MLX + WhisperKit + Parakeet
+// combination (only the latest `Package.swift` is effective at a time).
 //
-// This pulls a large dependency graph (mlx-swift, swift-transformers, swift-huggingface,
-// swift-syntax) and compiles Metal kernels on first build. The default `Package.swift`
-// has none of that and builds fully offline.
+// It pulls a large dependency graph (mlx-swift, swift-transformers, swift-huggingface,
+// swift-syntax) and compiles Metal kernels on first build.
 import PackageDescription
 
 let package = Package(
