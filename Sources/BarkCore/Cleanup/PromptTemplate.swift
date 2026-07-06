@@ -20,12 +20,15 @@ public enum PromptTemplate {
     public static let openTag = "<transcript>"
     public static let closeTag = "</transcript>"
 
+    /// Shared with the settings prompt editor so display ≡ sent (013 SC-001):
+    /// the editor must render these exact constants, never re-typed literals.
+    public static let taskScaffold = "Task: "
+    public static let defaultTaskInstruction = "Fix grammar, punctuation, and capitalization."
+
     /// The system / instruction message for a mode.
     public static func system(for mode: Mode) -> String {
-        let task = mode.systemPrompt.isEmpty
-            ? "Fix grammar, punctuation, and capitalization."
-            : mode.systemPrompt
-        return guardrail + "\n\nTask: " + task
+        let task = mode.systemPrompt.isEmpty ? defaultTaskInstruction : mode.systemPrompt
+        return guardrail + "\n\n" + taskScaffold + task
     }
 
     /// The user message: the transcript fenced as untrusted data.
@@ -57,11 +60,14 @@ public enum PromptTemplate {
     /// Fallback when a mode defines no `revisionPrompt`.
     public static let genericRefineInstruction = "Apply the user's instruction to the text."
 
+    /// Shared with the settings prompt editor (013 SC-001), like `taskScaffold`.
+    public static let instructionStyleScaffold = "Instruction style: "
+
     /// System message for a refine turn: guardrail + the mode's revision prompt
     /// (or the generic instruction).
     public static func refineSystem(for mode: Mode) -> String {
         let style = (mode.revisionPrompt?.isEmpty == false) ? mode.revisionPrompt! : genericRefineInstruction
-        return refineGuardrail + "\n\nInstruction style: " + style
+        return refineGuardrail + "\n\n" + instructionStyleScaffold + style
     }
 
     /// User message for a refine turn: the draft and instruction each fenced,
