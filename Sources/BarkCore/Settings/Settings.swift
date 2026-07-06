@@ -45,6 +45,7 @@ public struct HotkeySetting: Codable, Sendable, Equatable {
 public struct Settings: Codable, Sendable, Equatable {
     public var selectedModeID: String
     public var customModes: [Mode]
+    public var builtInPromptOverrides: [String: PromptOverride]   // built-in modeID → prompt edits (013)
     public var appModeMap: [String: String]   // focused-app bundleID → modeID
     public var localeID: String
     public var sttBackend: STTBackendID
@@ -66,6 +67,7 @@ public struct Settings: Codable, Sendable, Equatable {
     public init(
         selectedModeID: String = Mode.clean.id,
         customModes: [Mode] = [],
+        builtInPromptOverrides: [String: PromptOverride] = [:],
         appModeMap: [String: String] = [:],
         localeID: String = "en-US",
         sttBackend: STTBackendID = .apple,
@@ -86,6 +88,7 @@ public struct Settings: Codable, Sendable, Equatable {
     ) {
         self.selectedModeID = selectedModeID
         self.customModes = customModes
+        self.builtInPromptOverrides = builtInPromptOverrides
         self.appModeMap = appModeMap
         self.localeID = localeID
         self.sttBackend = sttBackend
@@ -113,6 +116,7 @@ public struct Settings: Codable, Sendable, Equatable {
         let d = Settings.default
         selectedModeID = try c.decodeIfPresent(String.self, forKey: .selectedModeID) ?? d.selectedModeID
         customModes = try c.decodeIfPresent([Mode].self, forKey: .customModes) ?? d.customModes
+        builtInPromptOverrides = try c.decodeIfPresent([String: PromptOverride].self, forKey: .builtInPromptOverrides) ?? d.builtInPromptOverrides
         appModeMap = try c.decodeIfPresent([String: String].self, forKey: .appModeMap) ?? d.appModeMap
         localeID = try c.decodeIfPresent(String.self, forKey: .localeID) ?? d.localeID
         sttBackend = try c.decodeIfPresent(STTBackendID.self, forKey: .sttBackend) ?? d.sttBackend
@@ -132,8 +136,21 @@ public struct Settings: Codable, Sendable, Equatable {
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? d.hasCompletedOnboarding
     }
 
-    /// Build a `ModeRegistry` from built-ins + custom modes with the saved selection.
+    /// The mode list everything runs on: built-ins with any user prompt
+    /// overrides applied, then custom modes. Single source of truth so the
+    /// settings UI, per-app resolution, and the pipeline all see the same
+    /// prompts (013 / SC-001).
+    public func effectiveModes() -> [Mode] {
+        // Invalid overrides (e.g. a hand-edited defaults payload over the field
+        // bound) are ignored, so FR-009 holds regardless of writer (ADV-004).
+        Mode.builtInModes.map { shipped in
+            let override = builtInPromptOverrides[shipped.id]
+            return shipped.applyingOverride(override?.isValid == true ? override : nil)
+        } + customModes
+    }
+
+    /// Build a `ModeRegistry` from the effective modes with the saved selection.
     public func makeModeRegistry() -> ModeRegistry {
-        ModeRegistry(modes: Mode.builtInModes + customModes, selectedID: selectedModeID)
+        ModeRegistry(modes: effectiveModes(), selectedID: selectedModeID)
     }
 }

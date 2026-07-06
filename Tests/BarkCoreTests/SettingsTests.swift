@@ -50,6 +50,29 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(round.speakerSensitivity, .high)
     }
 
+    func testPromptOverridesRoundTripAndTolerantDecode() throws {
+        // Round-trip with overrides (013).
+        var s = Settings.default
+        s.builtInPromptOverrides = ["email": PromptOverride(systemPrompt: "Casual.", revisionPrompt: nil),
+                                    "code": PromptOverride(revisionPrompt: "Terse.")]
+        let round = try JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(s))
+        XCTAssertEqual(round, s)
+        XCTAssertEqual(round.builtInPromptOverrides["email"]?.systemPrompt, "Casual.")
+        XCTAssertNil(round.builtInPromptOverrides["email"]?.revisionPrompt)
+
+        // Legacy payload without the key decodes to no overrides.
+        let old = try JSONDecoder().decode(Settings.self, from: Data("{}".utf8))
+        XCTAssertTrue(old.builtInPromptOverrides.isEmpty)
+    }
+
+    func testMakeModeRegistryReflectsOverrides() {
+        var s = Settings.default
+        s.builtInPromptOverrides["email"] = PromptOverride(systemPrompt: "Casual email.")
+        let reg = s.makeModeRegistry()
+        XCTAssertEqual(reg.mode(id: "email")?.systemPrompt, "Casual email.")
+        XCTAssertEqual(reg.mode(id: "email")?.name, Mode.email.name)   // identity preserved
+    }
+
     func testMakeModeRegistryMergesCustomAndSelection() {
         let custom = Mode(id: "legal", name: "Legal", usesLLM: true)
         let s = Settings(selectedModeID: "legal", customModes: [custom])

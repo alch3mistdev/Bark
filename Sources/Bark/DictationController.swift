@@ -129,7 +129,7 @@ public final class DictationController {
 
     // MARK: - Settings-derived state (UI binds here; writes persist)
 
-    public var modes: [Mode] { Mode.builtInModes + settings.settings.customModes }
+    public var modes: [Mode] { settings.settings.effectiveModes() }
 
     public var selectedModeID: String {
         get { settings.settings.selectedModeID }
@@ -169,13 +169,55 @@ public final class DictationController {
         }
     }
 
-    public func upsertMode(_ mode: Mode) {
+    /// Returns false (and sets `lastError`) when the mode is rejected, so the
+    /// editor can keep the sheet open instead of silently dropping edits (ADV-002).
+    @discardableResult
+    public func upsertMode(_ mode: Mode) -> Bool {
         // A custom id colliding with a built-in would be silently shadowed (ADV-005).
-        guard !Mode.builtInModes.contains(where: { $0.id == mode.id }) else { return }
+        guard !Mode.builtInModes.contains(where: { $0.id == mode.id }) else {
+            lastError = "That mode id is reserved for a built-in mode."
+            return false
+        }
+        // Same bound as built-in overrides: reject, never truncate (013 FR-009).
+        guard mode.systemPrompt.count <= PromptOverride.maxFieldLength,
+              (mode.revisionPrompt?.count ?? 0) <= PromptOverride.maxFieldLength else {
+            lastError = "Prompt text is over the \(PromptOverride.maxFieldLength)-character limit."
+            return false
+        }
         settings.update { s in
             if let i = s.customModes.firstIndex(where: { $0.id == mode.id }) { s.customModes[i] = mode }
             else { s.customModes.append(mode) }
         }
+        return true
+    }
+
+    // MARK: - Built-in prompt overrides (013)
+
+    public func builtInOverride(id: String) -> PromptOverride? {
+        settings.settings.builtInPromptOverrides[id]
+    }
+
+    /// Store (or clear, with `nil`) a built-in mode's prompt edits. Overrides
+    /// that are invalid (over the field bound), target a non-built-in id, or
+    /// change nothing versus the shipped default are not persisted — the last
+    /// case prunes any existing entry so "Modified" never shows spuriously.
+    @discardableResult
+    public func setBuiltInOverride(id: String, _ override: PromptOverride?) -> Bool {
+        guard let shipped = Mode.builtInModes.first(where: { $0.id == id }) else { return false }
+        let pruned: PromptOverride? = {
+            guard let override, !override.isEmpty, !override.isNoOp(for: shipped) else { return nil }
+            return override
+        }()
+        if let pruned, !pruned.isValid {
+            lastError = "Prompt text is over the \(PromptOverride.maxFieldLength)-character limit."
+            return false
+        }
+        settings.update { $0.builtInPromptOverrides[id] = pruned }
+        return true
+    }
+
+    public func isBuiltInModified(id: String) -> Bool {
+        settings.settings.builtInPromptOverrides[id] != nil
     }
 
     public func removeMode(id: String) {
