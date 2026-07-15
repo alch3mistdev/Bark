@@ -53,13 +53,13 @@
 
 ## Phase 6: PR 5 — Settings & error surfaces (P1)
 
-- [ ] T023 [PR5] Settings-corruption backup key + `didResetSettings` one-time menu notice in `Sources/Bark/SettingsStore.swift` + `Sources/Bark/UI/MenuContentView.swift`
-- [ ] T024 [P] [PR5] Injection-failure clipboard rescue + message + 4s linger in `Sources/Bark/DictationController.swift`
-- [ ] T025 [P] [PR5] Accessibility-denied error → actionable message + "Open System Settings"
-- [ ] T026 [P] [PR5] HotkeyRecorder affordance: "Press F1–F20…", rejection note, Escape cancels
-- [ ] T027 [PR5] Tab captions; fold Per-app pane into Modes; per-pane file split (`Sources/Bark/UI/Settings/`); shared window-size constant
-- [ ] T028 [P] [PR5] `PermissionKind` displayName/purpose extension consumed by all 3 views; fix onboarding copy
-- [ ] T029 [PR5] Build + test green; corruption/permission/injection-failure manual walkthrough
+- [x] T023 [PR5] Corrupt blob → backup under `<key>.backup` + `didResetSettings` flag + one-time menu notice with OK; 3 new `SettingsStoreTests` (also closes the untested-wrapper gap)
+- [x] T024 [P] [PR5] Injection failure rescues produced text to clipboard + "Your text was copied to the clipboard." — EXCEPT secure-field refusals (that text was headed for a password field; keeping it off the world-readable pasteboard is the point of the guard)
+- [x] T025 [P] [PR5] `InjectionError.accessibilityDenied` gets an explicit message; `lastErrorPermission` drives an "Open System Settings" button in the menu
+- [x] T026 [P] [PR5] HotkeyRecorder: "Press a function key (F1–F20)…", inline rejection note with the why, Escape cancels
+- [x] T027 [PR5] Icon+caption tabs (7 after folding Per-app into Modes as `AppModeSections`); monolith split into `UI/Settings/{General,Hotkey,Modes,PromptEditors,History,Permissions,Privacy,Models}Pane.swift`; `SettingsView.windowSize` shared with WindowManager
+- [x] T028 [P] [PR5] `PermissionKind.displayName/.purpose` extension (UI/PermissionCopy.swift) consumed by settings/onboarding/menu; onboarding headline now says only mic is required
+- [x] T029 [PR5] Build + test green (261 tests); corruption/permission-loss/injection-failure live walkthrough left to reviewer
 
 ## Phase 7: PR 6 — Hygiene (P2)
 

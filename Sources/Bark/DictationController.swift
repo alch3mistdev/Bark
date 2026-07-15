@@ -32,6 +32,7 @@ public final class DictationController {
     public private(set) var inputLevel: Float = 0    // 0...1 smoothed mic level for the HUD meter
     public private(set) var speakerEnrolled = false  // a usable voiceprint is loaded (011)
     public private(set) var lastCleanupOutcome: CleanupOutcome?  // drives the HUD's honest completion note
+    public private(set) var lastErrorPermission: PermissionKind? // set when lastError is a permission problem
 
     // Hold-to-refine (012). The evolving draft + activity drive the HUD; injection
     // happens only at fn-release. `refineHint` carries the one-time "needs LLM" note.
@@ -454,6 +455,7 @@ public final class DictationController {
             if soundFeedback { Feedback.inserted() }
         } catch {
             lastError = Self.injectionMessage(error)
+            lastErrorPermission = Self.permissionHint(error)
         }
     }
 
@@ -576,7 +578,7 @@ public final class DictationController {
         guard !machine.isActive, !handsFreeActive else { return }   // one mic owner at a time
         // Recover from a previous .completed / .failed run so the hotkey always works.
         if machine.phase != .idle { machine.handle(.reset) }
-        lastError = nil
+        lastError = nil; lastErrorPermission = nil
 
         guard permissions.microphone == .granted else {
             fail("Microphone access is required. Grant it in System Settings.")
@@ -869,8 +871,31 @@ public final class DictationController {
         do {
             try await performInjection(rawText, transcript: transcript, mode: mode)
         } catch {
-            fail(Self.injectionMessage(error))
+            fail(await injectionFailureMessage(error, text: rawText))
+            lastErrorPermission = Self.permissionHint(error)
         }
+    }
+
+    /// Failure message for an injection error, after rescuing the produced text
+    /// to the clipboard so a failed insert never loses the dictation. Skipped
+    /// for a secure-field refusal: that text was headed for a password field
+    /// and must not land on the world-readable pasteboard.
+    private func injectionFailureMessage(_ injectionError: Error, text: String) async -> String {
+        if case InjectionError.secureFieldBlocked = injectionError { return Self.injectionMessage(injectionError) }
+        let plan = InjectionPlan(target: InjectionTarget(pid: 0, bundleID: nil), strategy: .copyOnly)
+        do {
+            try await clipboardInjector.inject(text, plan: plan)
+            return Self.injectionMessage(injectionError) + " Your text was copied to the clipboard."
+        } catch {
+            return Self.injectionMessage(injectionError)
+        }
+    }
+
+    /// The permission whose loss explains `error`, if any — drives the menu's
+    /// "Open System Settings" affordance.
+    private static func permissionHint(_ error: Error) -> PermissionKind? {
+        if case InjectionError.accessibilityDenied = error { return .accessibility }
+        return nil
     }
 
     /// Does the actual injection; throws on failure so the CALLER decides whether
@@ -920,6 +945,8 @@ public final class DictationController {
         switch error {
         case InjectionError.secureFieldBlocked: return "Refused: a password/secure field is focused."
         case InjectionError.focusChanged: return "Window focus changed — text not inserted."
+        case InjectionError.accessibilityDenied:
+            return "Accessibility permission is off — Bark can't type into apps without it."
         default: return "Couldn't insert text: \(describe(error))"
         }
     }
@@ -1113,7 +1140,7 @@ public final class DictationController {
 
     public func startHandsFree() {
         guard !handsFreeActive, !machine.isActive else { return }  // one mic owner
-        lastError = nil
+        lastError = nil; lastErrorPermission = nil
         guard permissions.microphone == .granted else {
             fail("Microphone access is required. Grant it in System Settings.")
             permissions.openSettings(for: .microphone)
@@ -1237,7 +1264,8 @@ public final class DictationController {
                         do {
                             try await performInjection(cleaned, transcript: transcript, mode: mode)
                         } catch {
-                            lastError = Self.injectionMessage(error)
+                            lastError = await injectionFailureMessage(error, text: cleaned)
+                            lastErrorPermission = Self.permissionHint(error)
                             machine.handle(.reset); phase = machine.phase
                         }
                     } else {

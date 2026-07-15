@@ -9,6 +9,17 @@ struct MenuContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             header
 
+            if controller.settings.didResetSettings {
+                HStack(alignment: .top, spacing: 8) {
+                    Label("Settings couldn't be read and were reset to defaults. The old data is kept as a backup.",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("OK") { controller.settings.acknowledgeReset() }
+                        .controlSize(.small)
+                }
+            }
+
             if !controller.permissionsReady {
                 PermissionsBanner(controller: controller)
                 Divider()
@@ -44,10 +55,16 @@ struct MenuContentView: View {
             }
 
             if let error = controller.lastError {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let kind = controller.lastErrorPermission {
+                        Button("Open System Settings") { controller.permissions.openSettings(for: kind) }
+                            .controlSize(.small)
+                    }
+                }
             }
 
             controlButton
@@ -223,11 +240,5 @@ struct PermissionsBanner: View {
         }
     }
 
-    private func label(for kind: PermissionKind) -> String {
-        switch kind {
-        case .microphone: return "Microphone"
-        case .accessibility: return "Accessibility (type into apps)"
-        case .inputMonitoring: return "Input Monitoring (global hotkey)"
-        }
-    }
+    private func label(for kind: PermissionKind) -> String { kind.displayName }
 }

@@ -7,26 +7,35 @@ struct HotkeyRecorder: View {
     @Binding var setting: HotkeySetting
     @State private var recording = false
     @State private var monitor: Any?
+    @State private var rejectionNote: String?
 
     var body: some View {
-        HStack {
-            Text(setting.displayName)
-                .font(.body.monospaced())
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityLabel("Current hotkey")
-                .accessibilityValue(setting.displayName)
-            Button(recording ? "Press a key or modifier…" : "Record") {
-                recording ? stop() : start()
+        VStack(alignment: .trailing, spacing: 4) {
+            HStack {
+                Text(setting.displayName)
+                    .font(.body.monospaced())
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityLabel("Current hotkey")
+                    .accessibilityValue(setting.displayName)
+                Button(recording ? "Press a function key (F1–F20)…" : "Record") {
+                    recording ? stop() : start()
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel(recording ? "Recording, press a function key now" : "Record new hotkey")
+                .accessibilityHint("Only function keys (F1–F20) can be a global hotkey")
             }
-            .buttonStyle(.bordered)
-            .accessibilityLabel(recording ? "Recording, press a function key now" : "Record new hotkey")
-            .accessibilityHint("Only function keys (F1–F20) can be a global hotkey")
+            if let rejectionNote {
+                Text(rejectionNote)
+                    .font(.caption2).foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .onDisappear(perform: stop)
     }
 
     private func start() {
         recording = true
+        rejectionNote = nil
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
             handle(event)
             return nil   // swallow while recording
@@ -43,7 +52,15 @@ struct HotkeyRecorder: View {
         // Modifier-hold triggers are chosen via the preset picker; the recorder
         // only captures a function/navigation key as a toggle (a printable key
         // would be consumed globally and become untypable).
-        guard event.type == .keyDown, isAllowedToggleKey(event) else { return }
+        guard event.type == .keyDown else { return }
+        if event.keyCode == 53 { stop(); return }   // Escape cancels recording
+        guard isAllowedToggleKey(event) else {
+            // Say WHY at the point of failure instead of silently eating the key.
+            rejectionNote = "Only function keys (F1–F20) can be a global hotkey — "
+                + "a printable key would become untypable everywhere. Esc cancels."
+            return
+        }
+        rejectionNote = nil
         setting = HotkeySetting(kind: .keyToggle, keyCode: UInt16(event.keyCode), modifierFlags: 0)
         stop()
     }

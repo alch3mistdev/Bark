@@ -21,7 +21,7 @@ struct OnboardingView: View {
 
             Divider()
 
-            Text("Grant three permissions to get started:").font(.headline)
+            Text("Bark uses three permissions — only the microphone is required:").font(.headline)
             VStack(spacing: 10) {
                 ForEach(PermissionKind.allCases, id: \.self) { kind in
                     PermissionRow(controller: controller, kind: kind)
@@ -101,14 +101,6 @@ private struct PermissionRow: View {
         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
     }
 
-    private var title: String {
-        switch kind { case .microphone: "Microphone"; case .accessibility: "Accessibility"; case .inputMonitoring: "Input Monitoring" }
-    }
-    private var subtitle: String {
-        switch kind {
-        case .microphone: "Capture your voice (audio stays on-device)."
-        case .accessibility: "Insert text into the app you're using."
-        case .inputMonitoring: "Detect the global push-to-talk hotkey."
-        }
-    }
+    private var title: String { kind.displayName }
+    private var subtitle: String { kind.purpose }
 }

@@ -23,8 +23,9 @@ final class WindowManager {
         let hosting = NSHostingController(rootView: SettingsView(controller: controller))
         hosting.sizingOptions = []
 
+        let size = SettingsView.windowSize
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 430),
+            contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -32,7 +33,7 @@ final class WindowManager {
         window.title = "Bark Settings"
         window.isReleasedWhenClosed = false
         window.contentViewController = hosting
-        window.setContentSize(NSSize(width: 480, height: 430))
+        window.setContentSize(size)
         window.center()
         settingsWindow = window
         present(window)
