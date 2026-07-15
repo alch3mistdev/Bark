@@ -91,6 +91,12 @@ public enum PromptTemplate {
 /// Rejects LLM output that doesn't look like a faithful rewrite (excessive
 /// agency / hallucination guard — AIML-004). Falls back to deterministic text.
 public enum OutputValidator {
+    /// The growth bound, shared with the LLM engine's mid-stream abort so both
+    /// enforce the same limit: a faithful cleanup must not balloon the text.
+    public static func maxChars(forInputLength inputLength: Int, maxGrowth: Double = 3.0) -> Int {
+        Int(Double(max(inputLength, 1)) * maxGrowth) + 40
+    }
+
     /// Returns `validated` output, or throws `.outputRejected` if it ballooned
     /// far beyond the input (a cleanup must not 5× the text).
     public static func validate(_ output: String, against input: String, maxGrowth: Double = 3.0) throws -> String {
@@ -98,9 +104,8 @@ public enum OutputValidator {
         if trimmed.isEmpty {
             throw CleanupError.outputRejected(reason: "empty")
         }
-        let inLen = max(input.count, 1)
-        if Double(trimmed.count) > Double(inLen) * maxGrowth + 40 {
-            throw CleanupError.outputRejected(reason: "output too long (\(trimmed.count) vs input \(inLen))")
+        if trimmed.count > maxChars(forInputLength: input.count, maxGrowth: maxGrowth) {
+            throw CleanupError.outputRejected(reason: "output too long (\(trimmed.count) vs input \(max(input.count, 1)))")
         }
         return trimmed
     }

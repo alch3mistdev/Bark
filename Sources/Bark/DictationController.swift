@@ -60,6 +60,7 @@ public final class DictationController {
     private let speakerProfileStore: SpeakerProfileStore?
     private let speakerVerifier = SpeakerVerifier()
     private let cleanupDeadline: Double
+    private let sttFinalizeDeadline: Double
     private let targetProvider: @MainActor () -> InjectionTarget?
 
     private var machine = DictationStateMachine()
@@ -105,6 +106,7 @@ public final class DictationController {
         keystrokeInjector: TextInjector = KeystrokeInjector(),
         clipboardInjector: TextInjector = ClipboardInjector(),
         cleanupDeadline: Double = 8,
+        sttFinalizeDeadline: Double = 5,
         targetProvider: @escaping @MainActor () -> InjectionTarget? = { FocusProbe.currentTarget() }
     ) {
         self.settings = settings
@@ -121,6 +123,7 @@ public final class DictationController {
         self.keystrokeInjector = keystrokeInjector
         self.clipboardInjector = clipboardInjector
         self.cleanupDeadline = cleanupDeadline
+        self.sttFinalizeDeadline = sttFinalizeDeadline
         self.targetProvider = targetProvider
         self.llmStatus = (llmCleaner != nil) ? .notLoaded : .unavailable
     }
@@ -604,7 +607,7 @@ public final class DictationController {
             // analyzer no audio, and SpeechAnalyzer.finalizeAndFinishThroughEndOfInput
             // can then never complete (would freeze the session at "transcribing").
             do {
-                try await withThrowingDeadline(seconds: 5) { [stt] in try await stt.finishStream() }
+                try await withThrowingDeadline(seconds: sttFinalizeDeadline) { [stt] in try await stt.finishStream() }
             } catch {
                 await stt.cancel()
             }
@@ -1126,7 +1129,14 @@ public final class DictationController {
                 guard event == .speechEnded || capturedFrames >= maxUtteranceFrames else { continue }
 
                 machine.handle(.stopPressed); phase = machine.phase
-                try? await stt.finishStream()
+                // Bound the finalize exactly like push-to-talk's endSegment: a wedged
+                // SpeechAnalyzer finalize must not freeze the hands-free loop (same
+                // failure 0f9a9a3 fixed for quick fn taps).
+                do {
+                    try await withThrowingDeadline(seconds: sttFinalizeDeadline) { [stt] in try await stt.finishStream() }
+                } catch {
+                    await stt.cancel()
+                }
                 await resultConsumer?.value
                 resultConsumer = nil
                 capturing = false
