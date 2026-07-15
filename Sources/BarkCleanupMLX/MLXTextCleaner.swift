@@ -47,6 +47,13 @@ public actor MLXTextCleaner: TextCleaner {
         BarkLog.cleanup.info("mlx model loaded, active memory \(Memory.activeMemory, privacy: .public) bytes")
     }
 
+    /// Release the model weights and MLX's buffer cache — multiple GB back to
+    /// the OS. The next `prepare` reloads from the local HuggingFace cache.
+    public func unload() {
+        container = nil
+        Memory.clearCache()
+    }
+
     public func clean(_ text: String, mode: Mode) async throws -> String {
         // prepare() must have loaded the model; we never download under the deadline.
         guard let container else { throw CleanupError.modelUnavailable }

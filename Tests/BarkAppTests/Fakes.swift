@@ -248,6 +248,7 @@ final class FakePreparingCleaner: TextCleaner, @unchecked Sendable {
     enum Outcome { case succeed, fail }
     let outcome: Outcome
     private var loaded = false
+    private(set) var unloadCount = 0
 
     init(_ outcome: Outcome = .succeed) { self.outcome = outcome }
 
@@ -260,6 +261,11 @@ final class FakePreparingCleaner: TextCleaner, @unchecked Sendable {
         progress(1.0)
         if outcome == .fail { throw CleanupError.modelUnavailable }
         loaded = true
+    }
+
+    func unload() async {
+        loaded = false
+        unloadCount += 1
     }
 
     func clean(_ text: String, mode: Mode) async throws -> String {

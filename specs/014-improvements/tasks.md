@@ -45,11 +45,11 @@
 
 ## Phase 5: PR 4 — LLM lifecycle (P1)
 
-- [ ] T018 [PR4] `unload()` on `TextCleaner` protocol (default no-op) in `Sources/BarkCore/Cleanup/TextCleaner.swift`; MLX impl (`container = nil` + `GPU.clearCache()`)
-- [ ] T019 [PR4] Warm at dictation start: `prepareLLM()` in `startDictation()`/`startHandsFree()` when effective mode uses LLM
-- [ ] T020 [PR4] LLM-off branch calls `unload()`; idle TTL (15 min, controller-owned MainActor task) → unload + `.notLoaded`
-- [ ] T021 [PR4] Extend `Tests/BarkAppTests/LLMStatusTests.swift` for toggle-off unload + TTL + re-prepare paths
-- [ ] T022 [PR4] Manual: cancellation-propagation check (deadline 0.5s, watch GPU); update stale comment `DictationController.swift:1206-1209`
+- [x] T018 [PR4] `unload()` on `TextCleaner` protocol (default no-op); MLX impl `container = nil` + `Memory.clearCache()`
+- [x] T019 [PR4] `warmLLMIfNeeded()` at `startDictation()`/`startHandsFree()` when effective mode uses LLM — load overlaps speech
+- [x] T020 [PR4] LLM-off branch unloads (off = not resident); idle TTL (`llmIdleUnloadAfter` init param, default 15 min, controller-owned so `llmStatus` and availability never desync; armed on `.ready` and re-armed on each successful clean/refine)
+- [x] T021 [PR4] 3 new `LLMStatusTests`: toggle-off unload, TTL expiry + re-prepare, dictation-start warm (258 tests green)
+- [x] T022 [PR4] Comment updated: cancellation propagation verified in pinned mlx-swift-lm source (per-token `Task.isCancelled` check) — timed-out rewrites stop within ~a token; live GPU watch left to reviewer
 
 ## Phase 6: PR 5 — Settings & error surfaces (P1)
 

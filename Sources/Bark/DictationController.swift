@@ -62,6 +62,7 @@ public final class DictationController {
     private let speakerVerifier = SpeakerVerifier()
     private let cleanupDeadline: Double
     private let sttFinalizeDeadline: Double
+    private let llmIdleUnloadAfter: Double
     private let targetProvider: @MainActor () -> InjectionTarget?
 
     private var machine = DictationStateMachine()
@@ -77,6 +78,7 @@ public final class DictationController {
     private var handsFreeTask: Task<Void, Never>?
     private var handsFreeAudio: AudioCapturing?
     private var completedResetTask: Task<Void, Never>?   // returns .completed → .idle after the HUD linger
+    private var llmIdleUnloadTask: Task<Void, Never>?    // releases the model after idle (PR4)
     private var speakerProfile: SpeakerProfile?   // enrolled voiceprint, loaded on activate (011)
 
     // Hold-to-refine (012) session state — all MainActor-confined.
@@ -109,6 +111,7 @@ public final class DictationController {
         clipboardInjector: TextInjector = ClipboardInjector(),
         cleanupDeadline: Double = 8,
         sttFinalizeDeadline: Double = 5,
+        llmIdleUnloadAfter: Double = 15 * 60,
         targetProvider: @escaping @MainActor () -> InjectionTarget? = { FocusProbe.currentTarget() }
     ) {
         self.settings = settings
@@ -126,6 +129,7 @@ public final class DictationController {
         self.clipboardInjector = clipboardInjector
         self.cleanupDeadline = cleanupDeadline
         self.sttFinalizeDeadline = sttFinalizeDeadline
+        self.llmIdleUnloadAfter = llmIdleUnloadAfter
         self.targetProvider = targetProvider
         self.llmStatus = (llmCleaner != nil) ? .notLoaded : .unavailable
     }
@@ -256,8 +260,38 @@ public final class DictationController {
                 prepareLLM()                       // download/warm the model when opted in
             } else {
                 llmTask?.cancel(); llmTask = nil    // stop tracking an in-flight download
+                llmIdleUnloadTask?.cancel(); llmIdleUnloadTask = nil
                 if llmEnginePresent { llmStatus = .notLoaded }
+                // "Off" also means "not resident": return the ~2.5 GB to the OS.
+                Task { [llmCleaner] in await llmCleaner?.unload() }
             }
+        }
+    }
+
+    /// Kick the model load as dictation starts so it overlaps speech — the first
+    /// utterance then gets LLM quality far more often. This buys quality sooner,
+    /// never latency: `produceText` falls back to basic until the model is ready.
+    private func warmLLMIfNeeded() {
+        guard settings.settings.llmEnabled, llmEnginePresent, effectiveMode().usesLLM else { return }
+        switch llmStatus {
+        case .notLoaded, .failed: prepareLLM()
+        default: break
+        }
+    }
+
+    /// (Re)arm the idle unload: after `llmIdleUnloadAfter` with no LLM use, the
+    /// model is released. The status flips HERE, in the controller, so
+    /// `llmStatus` and actual availability can never desync — `produceText`
+    /// re-prepares from `.notLoaded`, and dictation start re-warms.
+    private func scheduleLLMIdleUnload() {
+        llmIdleUnloadTask?.cancel()
+        llmIdleUnloadTask = Task { @MainActor [weak self] in
+            guard let delay = self?.llmIdleUnloadAfter else { return }
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self, !Task.isCancelled, self.llmStatus == .ready else { return }
+            self.llmStatus = .notLoaded
+            await self.llmCleaner?.unload()
+            BarkLog.cleanup.info("llm released after \(Int(delay), privacy: .public)s idle")
         }
     }
 
@@ -302,6 +336,7 @@ public final class DictationController {
                 })
                 guard let self, !Task.isCancelled, self.settings.settings.llmEnabled else { return }
                 self.llmStatus = .ready
+                self.scheduleLLMIdleUnload()   // loaded-but-unused still expires
             } catch {
                 guard let self, !Task.isCancelled, self.settings.settings.llmEnabled else { return }
                 self.llmStatus = .failed("Download failed: \((error as NSError).localizedDescription)")
@@ -554,6 +589,7 @@ public final class DictationController {
         }
 
         capturedTarget = targetProvider()
+        warmLLMIfNeeded()   // model load overlaps the speech (PR4)
         finalSegments = []
         volatileTail = ""
         liveText = ""
@@ -728,6 +764,7 @@ public final class DictationController {
             }
             let validated = try OutputValidator.validate(rewritten, against: before)
             refine.applyRefine(rewrite: validated)
+            scheduleLLMIdleUnload()
         } catch {
             BarkLog.cleanup.error("refine failed, keeping draft: \(String(describing: error), privacy: .public)")
             refine.keepOnFailure()              // error/timeout/invalid → keep prior draft (FR-010)
@@ -813,6 +850,7 @@ public final class DictationController {
             machine.handle(.cleanupFinished)
             phase = machine.phase
             lastCleanupOutcome = .llm
+            scheduleLLMIdleUnload()
             return validated
         } catch {
             // LLM never blocks delivery — fall back to deterministic text.
@@ -1086,6 +1124,7 @@ public final class DictationController {
             return
         }
         handsFreeActive = true
+        warmLLMIfNeeded()   // model load overlaps the first utterance (PR4)
         onHandsFreeChange?(true)
         let engine = audioFactory()
         handsFreeAudio = engine
@@ -1260,6 +1299,12 @@ extension DictationController {
 /// cancellation: on timeout the work task is cancelled and its (late) result is
 /// dropped, and we resume with `CleanupError.timedOut`. A one-shot gate ensures
 /// the continuation resumes exactly once.
+///
+/// Note on the cancel: mlx-swift-lm's generation loop checks `Task.isCancelled`
+/// per token and its stream teardown cascades a `task.cancel()` (verified in the
+/// pinned checkout, Evaluate.swift/ChatSession.swift), so a timed-out rewrite
+/// stops within ~a token — it does not keep burning GPU. The guarantee here
+/// covers callees that don't cooperate (e.g. a wedged SpeechAnalyzer finalize).
 private final class DeadlineGate: @unchecked Sendable {
     private let lock = NSLock()
     private var fired = false

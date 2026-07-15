@@ -23,11 +23,19 @@ public protocol TextCleaner: Sendable {
     /// Progressive variant for live UI. Default implementation yields the
     /// single `clean(_:mode:)` result.
     func cleanStream(_ text: String, mode: Mode) -> AsyncThrowingStream<String, Error>
+
+    /// Release any loaded model/memory, returning the cleaner to its
+    /// pre-`prepare` state; a later `prepare` reloads (from the on-disk cache,
+    /// no re-download). Deterministic cleaners hold nothing (default no-op).
+    func unload() async
 }
 
 public extension TextCleaner {
     /// Default: nothing to load.
     func prepare(progress: @escaping @Sendable (Double) -> Void) async throws {}
+
+    /// Default: nothing to release.
+    func unload() async {}
 
     /// Default: this cleaner cannot refine (only the LLM cleaner overrides this).
     func refine(_ text: String, instruction: String, mode: Mode) async throws -> String {
