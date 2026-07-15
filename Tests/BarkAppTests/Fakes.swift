@@ -124,6 +124,35 @@ final class ScriptedSTTEngine: STTEngine, @unchecked Sendable {
     func cancel() async { cont?.finish(); cont = nil }
 }
 
+/// STT whose finalize wedges until `cancel()` tears the stream down — models
+/// SpeechAnalyzer.finalizeAndFinishThroughEndOfInput hanging on a bad utterance,
+/// the failure the finalize deadline must contain.
+final class HangingFinishSTTEngine: STTEngine, @unchecked Sendable {
+    private var cont: AsyncThrowingStream<STTResult, Error>.Continuation?
+    private(set) var cancelCount = 0
+
+    func prepare(locale: String) async throws {}
+
+    func beginStream() async throws -> AsyncThrowingStream<STTResult, Error> {
+        let (stream, c) = AsyncThrowingStream<STTResult, Error>.makeStream()
+        cont = c
+        return stream
+    }
+
+    func feed(_ frames: AudioFrames) async {}
+
+    func finishStream() async throws {
+        // Wedge until the deadline's work-task cancellation reaches us.
+        while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(10)) }
+    }
+
+    func cancel() async {
+        cancelCount += 1
+        cont?.finish()
+        cont = nil
+    }
+}
+
 /// 012: cleaner whose `refine` maps (draft, instruction) → output via a closure,
 /// for driving multi-turn refine flow tests. `clean` returns its input.
 final class ScriptedRefineCleaner: TextCleaner, @unchecked Sendable {
@@ -219,6 +248,7 @@ final class FakePreparingCleaner: TextCleaner, @unchecked Sendable {
     enum Outcome { case succeed, fail }
     let outcome: Outcome
     private var loaded = false
+    private(set) var unloadCount = 0
 
     init(_ outcome: Outcome = .succeed) { self.outcome = outcome }
 
@@ -231,6 +261,11 @@ final class FakePreparingCleaner: TextCleaner, @unchecked Sendable {
         progress(1.0)
         if outcome == .fail { throw CleanupError.modelUnavailable }
         loaded = true
+    }
+
+    func unload() async {
+        loaded = false
+        unloadCount += 1
     }
 
     func clean(_ text: String, mode: Mode) async throws -> String {

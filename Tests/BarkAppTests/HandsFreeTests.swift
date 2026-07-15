@@ -8,7 +8,8 @@ final class HandsFreeTests: XCTestCase {
     private func make(
         audio: @escaping @Sendable () -> AudioCapturing,
         injector: FakeInjector,
-        stt: FakeSTTEngine = FakeSTTEngine(finalText: "hello world")
+        stt: any STTEngine = FakeSTTEngine(finalText: "hello world"),
+        sttFinalizeDeadline: Double = 5
     ) -> DictationController {
         let settings = SettingsStore(defaults: UserDefaults(suiteName: "hf-\(UUID().uuidString)")!, key: "k")
         settings.update { $0.selectedModeID = "clean" }
@@ -19,6 +20,7 @@ final class HandsFreeTests: XCTestCase {
             stt: stt, handsFreeHotkey: HotkeyManager(),
             llmCleaner: nil, history: nil, audioFactory: audio,
             pasteInjector: injector, keystrokeInjector: injector,
+            sttFinalizeDeadline: sttFinalizeDeadline,
             targetProvider: { InjectionTarget(pid: 1, bundleID: "com.example.app") }
         )
     }
@@ -92,6 +94,25 @@ final class HandsFreeTests: XCTestCase {
         let cleared = await wait { !c.handsFreeActive }
         XCTAssertTrue(cleared)            // session torn down after the stream ended
         XCTAssertEqual(c.inputLevel, 0)   // meter not left frozen
+    }
+
+    func testHangingFinalizeDoesNotWedgeHandsFree() async {
+        // A wedged SpeechAnalyzer finalize must be abandoned after the deadline
+        // (cancel() teardown) — one bad utterance must not freeze the loop at
+        // "transcribing" forever. Mirrors the push-to-talk guard (0f9a9a3).
+        let injector = FakeInjector()
+        let script = [Float](repeating: 0.3, count: 3) + [Float](repeating: 0, count: 10)
+        let stt = HangingFinishSTTEngine()
+        let c = make(audio: { ScriptedAudioCapture(rmsLevels: script) }, injector: injector,
+                     stt: stt, sttFinalizeDeadline: 0.2)
+        await c.warmModel()
+        c.startHandsFree()
+
+        let recovered = await wait { stt.cancelCount >= 1 && c.phase != .transcribing }
+        XCTAssertTrue(recovered)             // finalize abandoned, loop moved on
+        XCTAssertTrue(c.handsFreeActive)     // session survives the bad utterance
+        XCTAssertEqual(injector.count, 0)    // nothing transcribed → nothing injected
+        c.stopHandsFree()
     }
 
     func testPushToTalkIgnoredWhileHandsFree() async {

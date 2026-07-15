@@ -42,7 +42,7 @@ touching the pipeline. See `docs/ADRs.md`.
 
 ```bash
 swift build            # fully offline, no external dependencies
-swift test             # 172 tests (core logic + controller orchestration + history crypto + STT backends + model inspector)
+swift test             # 260+ tests (core logic + controller orchestration + history crypto + STT backends + model inspector)
 
 # Build a draggable installer (ad-hoc signed for personal use):
 scripts/make-dmg.sh
@@ -203,7 +203,7 @@ Bark (SwiftUI MenuBarExtra)
 
 ## Status
 
-**Built & verified** (`swift build` clean + **172 passing tests**): the full record → STT → cleanup →
+**Built & verified** (`swift build` clean + **260+ passing tests**): the full record → STT → cleanup →
 inject pipeline, global hotkey (push-to-talk + consumed toggle), all six modes + custom modes,
 deterministic cleaner, settings persistence, launch-at-login, encrypted opt-in history, onboarding,
 and `.app`/DMG packaging. Shipped workflow features: **per-app auto-mode**, **output routing**

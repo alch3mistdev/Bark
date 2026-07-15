@@ -21,7 +21,7 @@ struct OnboardingView: View {
 
             Divider()
 
-            Text("Grant three permissions to get started:").font(.headline)
+            Text("Bark uses three permissions — only the microphone is required:").font(.headline)
             VStack(spacing: 10) {
                 ForEach(PermissionKind.allCases, id: \.self) { kind in
                     PermissionRow(controller: controller, kind: kind)
@@ -33,6 +33,30 @@ struct OnboardingView: View {
             Label("Hold **fn (Globe)** to talk; release to insert. Change it anytime in Settings.",
                   systemImage: "keyboard")
                 .font(.callout).foregroundStyle(.secondary)
+
+            #if MLXCleanup
+            // Optional, never gates onboarding: the flagship rewrite feature is a
+            // ~2.5 GB download the user would otherwise only discover in Settings.
+            Divider()
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("AI rewrite model (optional)").font(.body.weight(.medium))
+                    Text("Qwen3-4B, ~2.5 GB download — runs fully offline. Also available later in Settings.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                switch controller.llmStatus {
+                case .notLoaded:
+                    Button("Download") { controller.llmEnabled = true }   // opt-in + warm in one step
+                case .failed:
+                    Button("Retry") { controller.llmEnabled = true }
+                default:
+                    LLMStatusBadge(status: controller.llmStatus).font(.caption)
+                }
+            }
+            .padding(10)
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+            #endif
 
             HStack {
                 Text(controller.permissionsReady ? "You're ready!" : "Microphone is required to dictate.")
@@ -77,14 +101,6 @@ private struct PermissionRow: View {
         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
     }
 
-    private var title: String {
-        switch kind { case .microphone: "Microphone"; case .accessibility: "Accessibility"; case .inputMonitoring: "Input Monitoring" }
-    }
-    private var subtitle: String {
-        switch kind {
-        case .microphone: "Capture your voice (audio stays on-device)."
-        case .accessibility: "Insert text into the app you're using."
-        case .inputMonitoring: "Detect the global push-to-talk hotkey."
-        }
-    }
+    private var title: String { kind.displayName }
+    private var subtitle: String { kind.purpose }
 }

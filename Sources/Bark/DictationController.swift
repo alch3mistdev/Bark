@@ -31,6 +31,8 @@ public final class DictationController {
     public private(set) var isReinserting = false   // serializes one-click re-insert (Codex)
     public private(set) var inputLevel: Float = 0    // 0...1 smoothed mic level for the HUD meter
     public private(set) var speakerEnrolled = false  // a usable voiceprint is loaded (011)
+    public private(set) var lastCleanupOutcome: CleanupOutcome?  // drives the HUD's honest completion note
+    public private(set) var lastErrorPermission: PermissionKind? // set when lastError is a permission problem
 
     // Hold-to-refine (012). The evolving draft + activity drive the HUD; injection
     // happens only at fn-release. `refineHint` carries the one-time "needs LLM" note.
@@ -60,12 +62,12 @@ public final class DictationController {
     private let speakerProfileStore: SpeakerProfileStore?
     private let speakerVerifier = SpeakerVerifier()
     private let cleanupDeadline: Double
+    private let sttFinalizeDeadline: Double
+    private let llmIdleUnloadAfter: Double
     private let targetProvider: @MainActor () -> InjectionTarget?
 
     private var machine = DictationStateMachine()
     private var audio: AudioCapturing?
-    private var feedTask: Task<Void, Never>?
-    private var resultTask: Task<Void, Never>?
     private var finalSegments: [String] = []
     private var volatileTail = ""
     private var capturedTarget: InjectionTarget?
@@ -74,6 +76,8 @@ public final class DictationController {
     private var llmTask: Task<Void, Never>?
     private var handsFreeTask: Task<Void, Never>?
     private var handsFreeAudio: AudioCapturing?
+    private var completedResetTask: Task<Void, Never>?   // returns .completed → .idle after the HUD linger
+    private var llmIdleUnloadTask: Task<Void, Never>?    // releases the model after idle (PR4)
     private var speakerProfile: SpeakerProfile?   // enrolled voiceprint, loaded on activate (011)
 
     // Hold-to-refine (012) session state — all MainActor-confined.
@@ -105,6 +109,8 @@ public final class DictationController {
         keystrokeInjector: TextInjector = KeystrokeInjector(),
         clipboardInjector: TextInjector = ClipboardInjector(),
         cleanupDeadline: Double = 8,
+        sttFinalizeDeadline: Double = 5,
+        llmIdleUnloadAfter: Double = 15 * 60,
         targetProvider: @escaping @MainActor () -> InjectionTarget? = { FocusProbe.currentTarget() }
     ) {
         self.settings = settings
@@ -121,6 +127,8 @@ public final class DictationController {
         self.keystrokeInjector = keystrokeInjector
         self.clipboardInjector = clipboardInjector
         self.cleanupDeadline = cleanupDeadline
+        self.sttFinalizeDeadline = sttFinalizeDeadline
+        self.llmIdleUnloadAfter = llmIdleUnloadAfter
         self.targetProvider = targetProvider
         self.llmStatus = (llmCleaner != nil) ? .notLoaded : .unavailable
     }
@@ -216,8 +224,11 @@ public final class DictationController {
         return true
     }
 
+    /// True only when a stored override is actually applied by `effectiveModes()`
+    /// — an invalid (over-limit) blob, e.g. from a hand-edited defaults payload,
+    /// must not show a "Modified" badge for a prompt that runs as shipped (014).
     public func isBuiltInModified(id: String) -> Bool {
-        settings.settings.builtInPromptOverrides[id] != nil
+        settings.settings.builtInPromptOverrides[id]?.isValid == true
     }
 
     public func removeMode(id: String) {
@@ -251,8 +262,38 @@ public final class DictationController {
                 prepareLLM()                       // download/warm the model when opted in
             } else {
                 llmTask?.cancel(); llmTask = nil    // stop tracking an in-flight download
+                llmIdleUnloadTask?.cancel(); llmIdleUnloadTask = nil
                 if llmEnginePresent { llmStatus = .notLoaded }
+                // "Off" also means "not resident": return the ~2.5 GB to the OS.
+                Task { [llmCleaner] in await llmCleaner?.unload() }
             }
+        }
+    }
+
+    /// Kick the model load as dictation starts so it overlaps speech — the first
+    /// utterance then gets LLM quality far more often. This buys quality sooner,
+    /// never latency: `produceText` falls back to basic until the model is ready.
+    private func warmLLMIfNeeded() {
+        guard settings.settings.llmEnabled, llmEnginePresent, effectiveMode().usesLLM else { return }
+        switch llmStatus {
+        case .notLoaded, .failed: prepareLLM()
+        default: break
+        }
+    }
+
+    /// (Re)arm the idle unload: after `llmIdleUnloadAfter` with no LLM use, the
+    /// model is released. The status flips HERE, in the controller, so
+    /// `llmStatus` and actual availability can never desync — `produceText`
+    /// re-prepares from `.notLoaded`, and dictation start re-warms.
+    private func scheduleLLMIdleUnload() {
+        llmIdleUnloadTask?.cancel()
+        llmIdleUnloadTask = Task { @MainActor [weak self] in
+            guard let delay = self?.llmIdleUnloadAfter else { return }
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self, !Task.isCancelled, self.llmStatus == .ready else { return }
+            self.llmStatus = .notLoaded
+            await self.llmCleaner?.unload()
+            BarkLog.cleanup.info("llm released after \(Int(delay), privacy: .public)s idle")
         }
     }
 
@@ -297,6 +338,7 @@ public final class DictationController {
                 })
                 guard let self, !Task.isCancelled, self.settings.settings.llmEnabled else { return }
                 self.llmStatus = .ready
+                self.scheduleLLMIdleUnload()   // loaded-but-unused still expires
             } catch {
                 guard let self, !Task.isCancelled, self.settings.settings.llmEnabled else { return }
                 self.llmStatus = .failed("Download failed: \((error as NSError).localizedDescription)")
@@ -414,6 +456,7 @@ public final class DictationController {
             if soundFeedback { Feedback.inserted() }
         } catch {
             lastError = Self.injectionMessage(error)
+            lastErrorPermission = Self.permissionHint(error)
         }
     }
 
@@ -500,8 +543,6 @@ public final class DictationController {
     public func deactivate() {
         hotkey.stop()
         handsFreeHotkey.stop()
-        feedTask?.cancel()
-        resultTask?.cancel()
         ptTask?.cancel()
         llmTask?.cancel()
         handsFreeTask?.cancel()
@@ -536,7 +577,7 @@ public final class DictationController {
         guard !machine.isActive, !handsFreeActive else { return }   // one mic owner at a time
         // Recover from a previous .completed / .failed run so the hotkey always works.
         if machine.phase != .idle { machine.handle(.reset) }
-        lastError = nil
+        lastError = nil; lastErrorPermission = nil
 
         guard permissions.microphone == .granted else {
             fail("Microphone access is required. Grant it in System Settings.")
@@ -549,6 +590,7 @@ public final class DictationController {
         }
 
         capturedTarget = targetProvider()
+        warmLLMIfNeeded()   // model load overlaps the speech (PR4)
         finalSegments = []
         volatileTail = ""
         liveText = ""
@@ -604,7 +646,7 @@ public final class DictationController {
             // analyzer no audio, and SpeechAnalyzer.finalizeAndFinishThroughEndOfInput
             // can then never complete (would freeze the session at "transcribing").
             do {
-                try await withThrowingDeadline(seconds: 5) { [stt] in try await stt.finishStream() }
+                try await withThrowingDeadline(seconds: sttFinalizeDeadline) { [stt] in try await stt.finishStream() }
             } catch {
                 await stt.cancel()
             }
@@ -723,6 +765,7 @@ public final class DictationController {
             }
             let validated = try OutputValidator.validate(rewritten, against: before)
             refine.applyRefine(rewrite: validated)
+            scheduleLLMIdleUnload()
         } catch {
             BarkLog.cleanup.error("refine failed, keeping draft: \(String(describing: error), privacy: .public)")
             refine.keepOnFailure()              // error/timeout/invalid → keep prior draft (FR-010)
@@ -791,6 +834,10 @@ public final class DictationController {
         }
 
         guard mode.usesLLM, settings.settings.llmEnabled, let llm = llmCleaner, await llm.isAvailable else {
+            // Honest outcome for the HUD: an LLM mode landing here fell back
+            // because the model isn't ready — distinct from "basic was the plan".
+            lastCleanupOutcome = (mode.usesLLM && settings.settings.llmEnabled && llmEnginePresent)
+                ? .fallbackNotReady : .deterministic
             return basic
         }
 
@@ -803,12 +850,15 @@ public final class DictationController {
             let validated = try OutputValidator.validate(rewritten, against: basic)
             machine.handle(.cleanupFinished)
             phase = machine.phase
+            lastCleanupOutcome = .llm
+            scheduleLLMIdleUnload()
             return validated
         } catch {
             // LLM never blocks delivery — fall back to deterministic text.
             BarkLog.cleanup.error("LLM cleanup failed, using basic: \(String(describing: error), privacy: .public)")
             machine.handle(.cleanupFinished)
             phase = machine.phase
+            lastCleanupOutcome = .fallbackFailed
             return basic
         }
     }
@@ -820,8 +870,31 @@ public final class DictationController {
         do {
             try await performInjection(rawText, transcript: transcript, mode: mode)
         } catch {
-            fail(Self.injectionMessage(error))
+            fail(await injectionFailureMessage(error, text: rawText))
+            lastErrorPermission = Self.permissionHint(error)
         }
+    }
+
+    /// Failure message for an injection error, after rescuing the produced text
+    /// to the clipboard so a failed insert never loses the dictation. Skipped
+    /// for a secure-field refusal: that text was headed for a password field
+    /// and must not land on the world-readable pasteboard.
+    private func injectionFailureMessage(_ injectionError: Error, text: String) async -> String {
+        if case InjectionError.secureFieldBlocked = injectionError { return Self.injectionMessage(injectionError) }
+        let plan = InjectionPlan(target: InjectionTarget(pid: 0, bundleID: nil), strategy: .copyOnly)
+        do {
+            try await clipboardInjector.inject(text, plan: plan)
+            return Self.injectionMessage(injectionError) + " Your text was copied to the clipboard."
+        } catch {
+            return Self.injectionMessage(injectionError)
+        }
+    }
+
+    /// The permission whose loss explains `error`, if any — drives the menu's
+    /// "Open System Settings" affordance.
+    private static func permissionHint(_ error: Error) -> PermissionKind? {
+        if case InjectionError.accessibilityDenied = error { return .accessibility }
+        return nil
     }
 
     /// Does the actual injection; throws on failure so the CALLER decides whether
@@ -850,7 +923,13 @@ public final class DictationController {
         lastResult = sanitized
         if soundFeedback { Feedback.inserted() }
         recordHistory(transcript: transcript, output: sanitized, mode: mode, target: target)
-        reset()
+        // Keep `.completed` visible through the HUD linger (success checkmark +
+        // honest fallback note) — an immediate reset() used to flash it away in
+        // the same runloop turn, so "Done" never actually rendered. Session
+        // housekeeping still happens now; the phase returns to idle just after
+        // the linger, and startDictation recovers from `.completed` directly.
+        sessionHousekeeping()
+        scheduleCompletedReset()
     }
 
     private func injector(for strategy: InjectionStrategy) -> TextInjector {
@@ -865,6 +944,8 @@ public final class DictationController {
         switch error {
         case InjectionError.secureFieldBlocked: return "Refused: a password/secure field is focused."
         case InjectionError.focusChanged: return "Window focus changed — text not inserted."
+        case InjectionError.accessibilityDenied:
+            return "Accessibility permission is off — Bark can't type into apps without it."
         default: return "Couldn't insert text: \(describe(error))"
         }
     }
@@ -896,7 +977,6 @@ public final class DictationController {
         lastError = message
         machine.handle(.errored(message))
         phase = machine.phase
-        feedTask?.cancel(); resultTask?.cancel()
         audio?.stop(); audio = nil
         capturedTarget = nil   // don't let a dead session's target bleed into per-app mode (ADV-003)
         inputLevel = 0
@@ -905,23 +985,36 @@ public final class DictationController {
     }
 
     private func reset() {
-        feedTask = nil; resultTask = nil
+        sessionHousekeeping()
+        machine.handle(.reset)
+        phase = machine.phase
+    }
+
+    private func sessionHousekeeping() {
         ptTask = nil
         audio = nil
         capturedTarget = nil   // effectiveMode falls back to the manual selection until the next start (ADV-003)
-        machine.handle(.reset)
-        phase = machine.phase
         liveText = ""
         inputLevel = 0
         clearRefineState()
+    }
+
+    /// Return `.completed` to idle once the HUD linger has played out — unless a
+    /// new dictation (which recovers from `.completed` itself) got there first.
+    private func scheduleCompletedReset() {
+        completedResetTask?.cancel()
+        completedResetTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2.6))
+            guard let self, !Task.isCancelled, self.machine.phase == .completed else { return }
+            self.machine.handle(.reset)
+            self.phase = self.machine.phase
+        }
     }
 
     /// Stop a live session immediately (e.g. user rebinds the hotkey mid-dictation).
     public func cancelDictation() {
         guard machine.isActive else { return }
         sessionCancelled = true           // tells runPushToTalk to skip injection
-        feedTask?.cancel(); resultTask?.cancel()
-        feedTask = nil; resultTask = nil
         ptTask?.cancel()
         audio?.stop(); audio = nil
         capturedTarget = nil   // (ADV-003)
@@ -1042,7 +1135,7 @@ public final class DictationController {
 
     public func startHandsFree() {
         guard !handsFreeActive, !machine.isActive else { return }  // one mic owner
-        lastError = nil
+        lastError = nil; lastErrorPermission = nil
         guard permissions.microphone == .granted else {
             fail("Microphone access is required. Grant it in System Settings.")
             permissions.openSettings(for: .microphone)
@@ -1053,6 +1146,7 @@ public final class DictationController {
             return
         }
         handsFreeActive = true
+        warmLLMIfNeeded()   // model load overlaps the first utterance (PR4)
         onHandsFreeChange?(true)
         let engine = audioFactory()
         handsFreeAudio = engine
@@ -1126,7 +1220,14 @@ public final class DictationController {
                 guard event == .speechEnded || capturedFrames >= maxUtteranceFrames else { continue }
 
                 machine.handle(.stopPressed); phase = machine.phase
-                try? await stt.finishStream()
+                // Bound the finalize exactly like push-to-talk's endSegment: a wedged
+                // SpeechAnalyzer finalize must not freeze the hands-free loop (same
+                // failure 0f9a9a3 fixed for quick fn taps).
+                do {
+                    try await withThrowingDeadline(seconds: sttFinalizeDeadline) { [stt] in try await stt.finishStream() }
+                } catch {
+                    await stt.cancel()
+                }
                 await resultConsumer?.value
                 resultConsumer = nil
                 capturing = false
@@ -1158,7 +1259,8 @@ public final class DictationController {
                         do {
                             try await performInjection(cleaned, transcript: transcript, mode: mode)
                         } catch {
-                            lastError = Self.injectionMessage(error)
+                            lastError = await injectionFailureMessage(error, text: cleaned)
+                            lastErrorPermission = Self.permissionHint(error)
                             machine.handle(.reset); phase = machine.phase
                         }
                     } else {
@@ -1203,10 +1305,29 @@ public final class DictationController {
     }
 }
 
+extension DictationController {
+    /// How the delivered text was produced — lets the HUD say, honestly, whether
+    /// the LLM polished the text or the deterministic fallback ran (and why).
+    public enum CleanupOutcome: Equatable, Sendable {
+        case llm                 // LLM rewrite applied
+        case deterministic       // non-LLM mode / LLM off: basic cleanup was the plan
+        case fallbackNotReady    // LLM mode, but the model isn't loaded yet
+        case fallbackFailed      // LLM mode, but the rewrite failed / timed out / was rejected
+
+        public var isFallback: Bool { self == .fallbackNotReady || self == .fallbackFailed }
+    }
+}
+
 /// Runs `body` but guarantees a return by `seconds` even if `body` ignores
 /// cancellation: on timeout the work task is cancelled and its (late) result is
 /// dropped, and we resume with `CleanupError.timedOut`. A one-shot gate ensures
 /// the continuation resumes exactly once.
+///
+/// Note on the cancel: mlx-swift-lm's generation loop checks `Task.isCancelled`
+/// per token and its stream teardown cascades a `task.cancel()` (verified in the
+/// pinned checkout, Evaluate.swift/ChatSession.swift), so a timed-out rewrite
+/// stops within ~a token — it does not keep burning GPU. The guarantee here
+/// covers callees that don't cooperate (e.g. a wedged SpeechAnalyzer finalize).
 private final class DeadlineGate: @unchecked Sendable {
     private let lock = NSLock()
     private var fired = false

@@ -21,6 +21,19 @@ final class DictationControllerPromptOverrideTests: XCTestCase {
         )
     }
 
+    func testInvalidPersistedOverrideDoesNotShowModified() {
+        // 014: `effectiveModes()` ignores an invalid (over-limit) override, so the
+        // badge must agree — a persisted blob that isn't applied isn't "Modified".
+        let c = make()
+        let oversize = String(repeating: "x", count: PromptOverride.maxFieldLength + 1)
+        // Write directly into settings, bypassing setBuiltInOverride's validation
+        // (models a hand-edited defaults payload).
+        c.settings.update { $0.builtInPromptOverrides["email"] = PromptOverride(systemPrompt: oversize) }
+
+        XCTAssertFalse(c.isBuiltInModified(id: "email"))
+        XCTAssertEqual(c.modes.first { $0.id == "email" }?.systemPrompt, Mode.email.systemPrompt)
+    }
+
     func testSetGetResetRoundTrip() {
         let c = make()
         XCTAssertFalse(c.isBuiltInModified(id: "email"))

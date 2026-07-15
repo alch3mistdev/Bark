@@ -2,6 +2,7 @@ import Foundation
 import BarkCore
 
 #if MLXCleanup
+import MLX
 import MLXLLM
 import MLXLMCommon
 import MLXHuggingFace
@@ -16,10 +17,14 @@ import Tokenizers
 /// can never act as an instruction (AIML-002 / SEC-010). The caller bounds the
 /// output length (`OutputValidator`) and always has the deterministic fallback.
 public actor MLXTextCleaner: TextCleaner {
+    /// Single source of truth for the shipped rewrite model (CompositionRoot
+    /// uses the init default) — swap here to trial e.g. a smaller Qwen3-1.7B.
+    public static let defaultModelID = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
+
     private let modelID: String
     private var container: ModelContainer?
 
-    public init(modelID: String = "mlx-community/Qwen3-4B-Instruct-2507-4bit") {
+    public init(modelID: String = MLXTextCleaner.defaultModelID) {
         self.modelID = modelID
     }
 
@@ -40,14 +45,32 @@ public actor MLXTextCleaner: TextCleaner {
             progressHandler: { p in progress(p.fractionCompleted) }
         )
         container = model
+        // Bound MLX's transient buffer cache (weights aside) so footprint doesn't
+        // creep across generations. Generous for a bursty 4-bit 4B workload.
+        Memory.cacheLimit = 256 * 1024 * 1024
+        BarkLog.cleanup.info("mlx model loaded, active memory \(Memory.activeMemory, privacy: .public) bytes")
+    }
+
+    /// Release the model weights and MLX's buffer cache — multiple GB back to
+    /// the OS. The next `prepare` reloads from the local HuggingFace cache.
+    public func unload() {
+        container = nil
+        Memory.clearCache()
     }
 
     public func clean(_ text: String, mode: Mode) async throws -> String {
         // prepare() must have loaded the model; we never download under the deadline.
         guard let container else { throw CleanupError.modelUnavailable }
         // Fresh session per call → no conversation state bleeds between dictations.
-        let session = ChatSession(container, instructions: PromptTemplate.system(for: mode))
-        return try await session.respond(to: PromptTemplate.user(transcript: text))
+        let session = ChatSession(
+            container,
+            instructions: PromptTemplate.system(for: mode),
+            generateParameters: Self.generationParameters(inputLength: text.count)
+        )
+        return try await Self.collect(
+            session.streamDetails(to: PromptTemplate.user(transcript: text), images: [], videos: []),
+            inputLength: text.count, stage: "clean"
+        )
     }
 
     /// In-session refine (012): apply a spoken instruction to the running draft.
@@ -56,8 +79,54 @@ public actor MLXTextCleaner: TextCleaner {
     /// (`OutputValidator`) and wraps this in the per-turn deadline.
     public func refine(_ text: String, instruction: String, mode: Mode) async throws -> String {
         guard let container else { throw CleanupError.modelUnavailable }
-        let session = ChatSession(container, instructions: PromptTemplate.refineSystem(for: mode))
-        return try await session.respond(to: PromptTemplate.refineUser(draft: text, instruction: instruction))
+        let session = ChatSession(
+            container,
+            instructions: PromptTemplate.refineSystem(for: mode),
+            generateParameters: Self.generationParameters(inputLength: text.count)
+        )
+        return try await Self.collect(
+            session.streamDetails(to: PromptTemplate.refineUser(draft: text, instruction: instruction), images: [], videos: []),
+            inputLength: text.count, stage: "refine"
+        )
+    }
+
+    /// Cap output tokens to what a faithful rewrite of `chars` input could need
+    /// (~4 chars/token English, ~1.5× headroom). Temperature 0 selects the
+    /// deterministic argmax sampler — right for a cleanup function. A
+    /// cap-truncated output exceeds `OutputValidator`'s char bound and lands on
+    /// the deterministic fallback: the same outcome as exhausting the 8s
+    /// deadline, reached in a fraction of the time.
+    private static func generationParameters(inputLength chars: Int) -> GenerateParameters {
+        GenerateParameters(maxTokens: max(64, min(2048, chars * 6 / 5 + 20)), temperature: 0)
+    }
+
+    /// Accumulate the streamed generation, aborting the moment output exceeds
+    /// the growth bound `OutputValidator` would reject anyway — breaking out of
+    /// the stream cancels the generation task within ~one token instead of
+    /// burning the remaining wall-clock deadline. Logs timing telemetry only
+    /// (never content — T-008).
+    private static func collect(
+        _ stream: AsyncThrowingStream<Generation, Error>,
+        inputLength: Int,
+        stage: String
+    ) async throws -> String {
+        let maxChars = OutputValidator.maxChars(forInputLength: inputLength)
+        var output = ""
+        for try await item in stream {
+            switch item {
+            case .chunk(let piece):
+                output += piece
+                guard output.count <= maxChars else {
+                    throw CleanupError.outputRejected(
+                        reason: "\(stage) exceeded growth bound mid-stream (\(output.count) > \(maxChars))")
+                }
+            case .info(let info):
+                BarkLog.cleanup.info("llm \(stage, privacy: .public): prompt \(info.promptTime, format: .fixed(precision: 3), privacy: .public)s, generate \(info.generateTime, format: .fixed(precision: 3), privacy: .public)s, \(info.tokensPerSecond, format: .fixed(precision: 1), privacy: .public) tok/s")
+            default:
+                break
+            }
+        }
+        return output
     }
 }
 
