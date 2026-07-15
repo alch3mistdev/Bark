@@ -42,7 +42,7 @@ enum CompositionRoot {
 
         let llm: TextCleaner?
         #if MLXCleanup
-        llm = MLXTextCleaner(modelID: "mlx-community/Qwen3-4B-Instruct-2507-4bit")
+        llm = MLXTextCleaner()   // MLXTextCleaner.defaultModelID
         #else
         llm = nil   // LLM rewrite modes fall back to the deterministic cleaner
         #endif

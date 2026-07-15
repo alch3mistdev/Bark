@@ -17,10 +17,14 @@ import Tokenizers
 /// can never act as an instruction (AIML-002 / SEC-010). The caller bounds the
 /// output length (`OutputValidator`) and always has the deterministic fallback.
 public actor MLXTextCleaner: TextCleaner {
+    /// Single source of truth for the shipped rewrite model (CompositionRoot
+    /// uses the init default) — swap here to trial e.g. a smaller Qwen3-1.7B.
+    public static let defaultModelID = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
+
     private let modelID: String
     private var container: ModelContainer?
 
-    public init(modelID: String = "mlx-community/Qwen3-4B-Instruct-2507-4bit") {
+    public init(modelID: String = MLXTextCleaner.defaultModelID) {
         self.modelID = modelID
     }
 

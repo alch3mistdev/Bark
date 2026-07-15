@@ -68,8 +68,6 @@ public final class DictationController {
 
     private var machine = DictationStateMachine()
     private var audio: AudioCapturing?
-    private var feedTask: Task<Void, Never>?
-    private var resultTask: Task<Void, Never>?
     private var finalSegments: [String] = []
     private var volatileTail = ""
     private var capturedTarget: InjectionTarget?
@@ -226,8 +224,11 @@ public final class DictationController {
         return true
     }
 
+    /// True only when a stored override is actually applied by `effectiveModes()`
+    /// — an invalid (over-limit) blob, e.g. from a hand-edited defaults payload,
+    /// must not show a "Modified" badge for a prompt that runs as shipped (014).
     public func isBuiltInModified(id: String) -> Bool {
-        settings.settings.builtInPromptOverrides[id] != nil
+        settings.settings.builtInPromptOverrides[id]?.isValid == true
     }
 
     public func removeMode(id: String) {
@@ -542,8 +543,6 @@ public final class DictationController {
     public func deactivate() {
         hotkey.stop()
         handsFreeHotkey.stop()
-        feedTask?.cancel()
-        resultTask?.cancel()
         ptTask?.cancel()
         llmTask?.cancel()
         handsFreeTask?.cancel()
@@ -978,7 +977,6 @@ public final class DictationController {
         lastError = message
         machine.handle(.errored(message))
         phase = machine.phase
-        feedTask?.cancel(); resultTask?.cancel()
         audio?.stop(); audio = nil
         capturedTarget = nil   // don't let a dead session's target bleed into per-app mode (ADV-003)
         inputLevel = 0
@@ -993,7 +991,6 @@ public final class DictationController {
     }
 
     private func sessionHousekeeping() {
-        feedTask = nil; resultTask = nil
         ptTask = nil
         audio = nil
         capturedTarget = nil   // effectiveMode falls back to the manual selection until the next start (ADV-003)
@@ -1018,8 +1015,6 @@ public final class DictationController {
     public func cancelDictation() {
         guard machine.isActive else { return }
         sessionCancelled = true           // tells runPushToTalk to skip injection
-        feedTask?.cancel(); resultTask?.cancel()
-        feedTask = nil; resultTask = nil
         ptTask?.cancel()
         audio?.stop(); audio = nil
         capturedTarget = nil   // (ADV-003)

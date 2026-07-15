@@ -63,12 +63,12 @@
 
 ## Phase 7: PR 6 — Hygiene (P2)
 
-- [ ] T030 [P] [PR6] Delete dead `feedTask`/`resultTask` + cancel/nil sites in `Sources/Bark/DictationController.swift`
-- [ ] T031 [P] [PR6] `MLXTextCleaner.defaultModelID` static; CompositionRoot uses default
-- [ ] T032 [P] [PR6] `isBuiltInModified` respects override validity; test in `DictationControllerPromptOverrideTests`
-- [ ] T033 [P] [PR6] README: fix test count + phantom type names
-- [ ] T034 [P] [PR6] New `Tests/BarkAppTests/SpeakerEnrollmentControllerTests.swift` (short/quiet-take rejection, centroid, fail-closed, happy path)
-- [ ] T035 [PR6] Build + test green
+- [x] T030 [P] [PR6] Deleted dead `feedTask`/`resultTask` + all cancel/nil sites (grep-verified zero refs)
+- [x] T031 [P] [PR6] `MLXTextCleaner.defaultModelID` static; CompositionRoot uses init default
+- [x] T032 [P] [PR6] `isBuiltInModified` → `override?.isValid == true` (agrees with `effectiveModes()`); new hand-edited-payload test
+- [x] T033 [P] [PR6] README test count → "260+" (2 places). CORRECTION: the "phantom type names" review finding was wrong — `FocusGuard`/`TerminalDetector` (InjectionPlan.swift), `HotkeyConfig` (HotkeyManager.swift), `ModeRegistry` (Mode.swift) all exist, nested in other files; diagram left as-is
+- [x] T034 [P] [PR6] `SpeakerEnrollmentControllerTests`: 4 tests — 5-good-takes happy path (centroid saved, onComplete), quiet-take redo without counting, embedder-failure fails closed (nothing persisted), cancel discards
+- [x] T035 [PR6] Build + test green — **266 tests, 0 failures** (was 254 at review start)
 
 ## Dependencies
 
