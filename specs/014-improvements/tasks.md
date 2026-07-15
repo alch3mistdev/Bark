@@ -38,10 +38,10 @@
 
 ## Phase 4: PR 3 — Accessibility pass (P0)
 
-- [ ] T014 [P] [PR3] Tab labels + `.isSelected` traits in `Sources/Bark/UI/SettingsView.swift`
-- [ ] T015 [P] [PR3] LevelBar accessibility element (label + % value); HUD root `.accessibilityElement(children: .combine)` in `Sources/Bark/UI/RecordingHUDView.swift`
-- [ ] T016 [P] [PR3] HotkeyRecorder binding + recording-state announcements in `Sources/Bark/UI/HotkeyRecorder.swift`
-- [ ] T017 [PR3] Accessibility Inspector audit of scoped controls
+- [x] T014 [P] [PR3] Tab labels + `.isSelected` traits + "Settings sections" container in `Sources/Bark/UI/SettingsView.swift`
+- [x] T015 [P] [PR3] LevelBar accessibility element ("Microphone level", % value / "inactive"); both HUD layouts `.accessibilityElement(children: .combine)` + "Dictation status" in `Sources/Bark/UI/RecordingHUDView.swift`
+- [x] T016 [P] [PR3] HotkeyRecorder: current-binding label/value, recording-state button label, F1–F20 hint in `Sources/Bark/UI/HotkeyRecorder.swift`
+- [ ] T017 [PR3] Accessibility Inspector audit of scoped controls — left to reviewer (needs GUI session)
 
 ## Phase 5: PR 4 — LLM lifecycle (P1)
 

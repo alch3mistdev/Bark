@@ -53,9 +53,13 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.plain)
                     .help(item.title)
+                    .accessibilityLabel(item.title)
+                    .accessibilityAddTraits(pane == item ? .isSelected : [])
                 }
             }
             .padding(8)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Settings sections")
             Divider()
 
             Group {

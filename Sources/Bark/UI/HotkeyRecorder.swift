@@ -13,10 +13,14 @@ struct HotkeyRecorder: View {
             Text(setting.displayName)
                 .font(.body.monospaced())
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel("Current hotkey")
+                .accessibilityValue(setting.displayName)
             Button(recording ? "Press a key or modifier…" : "Record") {
                 recording ? stop() : start()
             }
             .buttonStyle(.bordered)
+            .accessibilityLabel(recording ? "Recording, press a function key now" : "Record new hotkey")
+            .accessibilityHint("Only function keys (F1–F20) can be a global hotkey")
         }
         .onDisappear(perform: stop)
     }

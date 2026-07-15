@@ -98,6 +98,8 @@ struct RecordingHUDView: View {
         .frame(width: 320, alignment: .leading)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.white.opacity(0.08)))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Dictation status")
     }
 
     // MARK: Enhanced (opt-in)
@@ -126,6 +128,8 @@ struct RecordingHUDView: View {
         .frame(width: 440, alignment: .leading)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.10)))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Dictation status")
     }
 }
 
@@ -149,6 +153,9 @@ struct LevelBar: View {
                 }
             }
         }
+        .accessibilityElement()
+        .accessibilityLabel("Microphone level")
+        .accessibilityValue(active ? "\(Int(level * 100))%" : "inactive")
     }
 
     private func color(for index: Int, lit: Bool) -> Color {
