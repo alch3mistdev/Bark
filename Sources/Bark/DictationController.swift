@@ -31,6 +31,7 @@ public final class DictationController {
     public private(set) var isReinserting = false   // serializes one-click re-insert (Codex)
     public private(set) var inputLevel: Float = 0    // 0...1 smoothed mic level for the HUD meter
     public private(set) var speakerEnrolled = false  // a usable voiceprint is loaded (011)
+    public private(set) var lastCleanupOutcome: CleanupOutcome?  // drives the HUD's honest completion note
 
     // Hold-to-refine (012). The evolving draft + activity drive the HUD; injection
     // happens only at fn-release. `refineHint` carries the one-time "needs LLM" note.
@@ -75,6 +76,7 @@ public final class DictationController {
     private var llmTask: Task<Void, Never>?
     private var handsFreeTask: Task<Void, Never>?
     private var handsFreeAudio: AudioCapturing?
+    private var completedResetTask: Task<Void, Never>?   // returns .completed → .idle after the HUD linger
     private var speakerProfile: SpeakerProfile?   // enrolled voiceprint, loaded on activate (011)
 
     // Hold-to-refine (012) session state — all MainActor-confined.
@@ -794,6 +796,10 @@ public final class DictationController {
         }
 
         guard mode.usesLLM, settings.settings.llmEnabled, let llm = llmCleaner, await llm.isAvailable else {
+            // Honest outcome for the HUD: an LLM mode landing here fell back
+            // because the model isn't ready — distinct from "basic was the plan".
+            lastCleanupOutcome = (mode.usesLLM && settings.settings.llmEnabled && llmEnginePresent)
+                ? .fallbackNotReady : .deterministic
             return basic
         }
 
@@ -806,12 +812,14 @@ public final class DictationController {
             let validated = try OutputValidator.validate(rewritten, against: basic)
             machine.handle(.cleanupFinished)
             phase = machine.phase
+            lastCleanupOutcome = .llm
             return validated
         } catch {
             // LLM never blocks delivery — fall back to deterministic text.
             BarkLog.cleanup.error("LLM cleanup failed, using basic: \(String(describing: error), privacy: .public)")
             machine.handle(.cleanupFinished)
             phase = machine.phase
+            lastCleanupOutcome = .fallbackFailed
             return basic
         }
     }
@@ -853,7 +861,13 @@ public final class DictationController {
         lastResult = sanitized
         if soundFeedback { Feedback.inserted() }
         recordHistory(transcript: transcript, output: sanitized, mode: mode, target: target)
-        reset()
+        // Keep `.completed` visible through the HUD linger (success checkmark +
+        // honest fallback note) — an immediate reset() used to flash it away in
+        // the same runloop turn, so "Done" never actually rendered. Session
+        // housekeeping still happens now; the phase returns to idle just after
+        // the linger, and startDictation recovers from `.completed` directly.
+        sessionHousekeeping()
+        scheduleCompletedReset()
     }
 
     private func injector(for strategy: InjectionStrategy) -> TextInjector {
@@ -908,15 +922,31 @@ public final class DictationController {
     }
 
     private func reset() {
+        sessionHousekeeping()
+        machine.handle(.reset)
+        phase = machine.phase
+    }
+
+    private func sessionHousekeeping() {
         feedTask = nil; resultTask = nil
         ptTask = nil
         audio = nil
         capturedTarget = nil   // effectiveMode falls back to the manual selection until the next start (ADV-003)
-        machine.handle(.reset)
-        phase = machine.phase
         liveText = ""
         inputLevel = 0
         clearRefineState()
+    }
+
+    /// Return `.completed` to idle once the HUD linger has played out — unless a
+    /// new dictation (which recovers from `.completed` itself) got there first.
+    private func scheduleCompletedReset() {
+        completedResetTask?.cancel()
+        completedResetTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2.6))
+            guard let self, !Task.isCancelled, self.machine.phase == .completed else { return }
+            self.machine.handle(.reset)
+            self.phase = self.machine.phase
+        }
     }
 
     /// Stop a live session immediately (e.g. user rebinds the hotkey mid-dictation).
@@ -1210,6 +1240,19 @@ public final class DictationController {
             }
         }
         return (error as NSError).localizedDescription
+    }
+}
+
+extension DictationController {
+    /// How the delivered text was produced — lets the HUD say, honestly, whether
+    /// the LLM polished the text or the deterministic fallback ran (and why).
+    public enum CleanupOutcome: Equatable, Sendable {
+        case llm                 // LLM rewrite applied
+        case deterministic       // non-LLM mode / LLM off: basic cleanup was the plan
+        case fallbackNotReady    // LLM mode, but the model isn't loaded yet
+        case fallbackFailed      // LLM mode, but the rewrite failed / timed out / was rejected
+
+        public var isFallback: Bool { self == .fallbackNotReady || self == .fallbackFailed }
     }
 }
 

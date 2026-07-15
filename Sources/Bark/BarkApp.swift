@@ -73,7 +73,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 extension DictationPhase {
     var menuSymbol: String {
         switch self {
-        case .idle, .completed: return "mic"
+        case .idle: return "mic"
+        case .completed: return "checkmark.circle.fill"
         case .listening: return "waveform"
         case .transcribing: return "ellipsis"
         case .cleaning: return "sparkles"

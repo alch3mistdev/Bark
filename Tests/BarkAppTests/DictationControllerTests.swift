@@ -57,7 +57,7 @@ final class DictationControllerTests: XCTestCase {
         c.setAppMode(bundleID: "com.example.TextEdit", modeID: "raw")  // == make()'s targetProvider bundleID
         await dictate(c)
         XCTAssertEqual(injector.last, "hello world")  // raw applied, not "Hello world"
-        XCTAssertEqual(c.phase, .idle)
+        XCTAssertEqual(c.phase, .completed)
     }
 
     func testCopyOnlyRoutesToClipboardNotPaste() async {
@@ -70,7 +70,7 @@ final class DictationControllerTests: XCTestCase {
         await dictate(c)
         XCTAssertEqual(clip.last, "hello world")  // copied
         XCTAssertEqual(paste.count, 0)             // nothing typed
-        XCTAssertEqual(c.phase, .idle)
+        XCTAssertEqual(c.phase, .completed)
     }
 
     // 007 — re-insert / copy
@@ -161,7 +161,8 @@ final class DictationControllerTests: XCTestCase {
         let c = make(stt: FakeSTTEngine(finalText: "hello world"), injector: injector, mode: "clean")
         await dictate(c)
         XCTAssertEqual(injector.last, "Hello world") // deterministic cleaner capitalised
-        XCTAssertEqual(c.phase, .idle)  // controller resets to idle after a successful insert
+        XCTAssertEqual(c.phase, .completed)  // stays visible for the HUD linger, then idles
+        XCTAssertEqual(c.lastCleanupOutcome, .deterministic)
     }
 
     func testLLMModeUsesCleanerOutput() async {
@@ -169,7 +170,8 @@ final class DictationControllerTests: XCTestCase {
         let c = make(cleaner: FakeCleaner(.ok("Rewritten email body.")), injector: injector, mode: "email")
         await dictate(c)
         XCTAssertEqual(injector.last, "Rewritten email body.")
-        XCTAssertEqual(c.phase, .idle)  // controller resets to idle after a successful insert
+        XCTAssertEqual(c.phase, .completed)  // stays visible for the HUD linger, then idles
+        XCTAssertEqual(c.lastCleanupOutcome, .llm)
     }
 
     func testLLMFailureFallsBackToDeterministic() async {
@@ -178,7 +180,8 @@ final class DictationControllerTests: XCTestCase {
                      cleaner: FakeCleaner(.fail), injector: injector, mode: "email")
         await dictate(c)
         XCTAssertEqual(injector.last, "Hello world") // fell back to basic cleaner
-        XCTAssertEqual(c.phase, .idle)  // controller resets to idle after a successful insert
+        XCTAssertEqual(c.phase, .completed)  // stays visible for the HUD linger, then idles
+        XCTAssertEqual(c.lastCleanupOutcome, .fallbackFailed)  // honest HUD note
     }
 
     func testLLMTimeoutFallsBackToDeterministic() async {
@@ -187,7 +190,8 @@ final class DictationControllerTests: XCTestCase {
                      cleaner: FakeCleaner(.hang), injector: injector, mode: "email", deadline: 0.2)
         await dictate(c)
         XCTAssertEqual(injector.last, "Hello world")
-        XCTAssertEqual(c.phase, .idle)  // controller resets to idle after a successful insert
+        XCTAssertEqual(c.phase, .completed)  // stays visible for the HUD linger, then idles
+        XCTAssertEqual(c.lastCleanupOutcome, .fallbackFailed)  // honest HUD note
     }
 
     func testSecureFieldRefusalDoesNotInject() async {
@@ -234,6 +238,6 @@ final class DictationControllerTests: XCTestCase {
         if case .failed = c.phase {} else { XCTFail("expected first run to fail") }
         await dictate(c) // restart
         XCTAssertEqual(injector.last, "Hello world")
-        XCTAssertEqual(c.phase, .idle)  // controller resets to idle after a successful insert
+        XCTAssertEqual(c.phase, .completed)  // stays visible for the HUD linger, then idles
     }
 }

@@ -29,12 +29,12 @@
 
 ## Phase 3: PR 2 — Trust & feedback UX (P0)
 
-- [ ] T008 [PR2] Render `controller.refineHint` as orange caption in both HUD layouts in `Sources/Bark/UI/RecordingHUDView.swift`
-- [ ] T009 [PR2] Add `lastCleanupOutcome` enum to `DictationController`, set in `produceText`; fallback status message + error linger in `Sources/Bark/RecordingHUDController.swift`
-- [ ] T010 [PR2] `ProgressView` during `.cleaning` in both HUD layouts
-- [ ] T011 [P] [PR2] `.completed` → `checkmark.circle.fill` green in `Sources/Bark/BarkApp.swift` phase map
-- [ ] T012 [PR2] Extract `LLMStatusBadge` to shared view; menu banner + Download button in `Sources/Bark/UI/MenuContentView.swift`; optional onboarding download row (`#if MLXCleanup`) in `Sources/Bark/UI/OnboardingView.swift`
-- [ ] T013 [PR2] Build + test green; manual walkthrough LLM on/off
+- [x] T008 [PR2] Render `controller.refineHint` (takes over the HUD status line, orange) in both layouts in `Sources/Bark/UI/RecordingHUDView.swift`
+- [x] T009 [PR2] `CleanupOutcome` enum + `lastCleanupOutcome` on `DictationController`, set in `produceText`; "Inserted — basic cleanup (…)" completion note; fallback gets the 2.5s error linger. **Bonus bug fix**: `performInjection` reset `.completed` → `.idle` in the same runloop turn, so "Done" never rendered at all — now `.completed` persists through the linger (`scheduleCompletedReset`, 2.6s) and `startDictation` recovers from it directly
+- [x] T010 [PR2] `ProgressView` during `.cleaning` in both HUD layouts
+- [x] T011 [P] [PR2] `.completed` → `checkmark.circle.fill` + green HUD accent in `Sources/Bark/BarkApp.swift` / `RecordingHUDView.swift`
+- [x] T012 [PR2] `LLMStatusBadge` extracted to `Sources/Bark/UI/LLMStatusBadge.swift`; menu banner + Download/Retry button when selected mode wants the unready LLM; optional non-gating onboarding download row (`#if MLXCleanup`, opt-in + warm via `llmEnabled = true`)
+- [x] T013 [PR2] Build + test green (255 tests; 7 assertions updated to the new `.completed`-linger contract, 4 new `lastCleanupOutcome` assertions); live HUD walkthrough left to reviewer
 
 ## Phase 4: PR 3 — Accessibility pass (P0)
 

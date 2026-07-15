@@ -28,16 +28,40 @@ struct RecordingHUDView: View {
             ? "Hands-free — listening…" : controller.phase.title
     }
 
-    private var accent: Color { controller.phase.isError ? .orange : .accentColor }
+    private var accent: Color {
+        if controller.phase.isError { return .orange }
+        if case .completed = controller.phase { return .green }
+        return .accentColor
+    }
 
-    // 012: surface the hold-to-refine state + the evolving draft.
+    // 012: surface the hold-to-refine state + the evolving draft. The one-time
+    // refine hint ("needs the LLM…") takes over the line while set — otherwise
+    // the gesture fails silently.
     private var statusLine: String {
+        if let hint = controller.refineHint { return hint }
         switch controller.refineActivity {
         case .capturingInstruction: return "Listening for instruction…"
         case .refining: return "Refining…"
-        case .dictating, .none: return title
+        case .dictating, .none:
+            // Honest completion: say when the LLM fell back to basic cleanup.
+            if case .completed = controller.phase, let note = fallbackNote {
+                return "Inserted — \(note)"
+            }
+            return title
         }
     }
+
+    private var fallbackNote: String? {
+        switch controller.lastCleanupOutcome {
+        case .fallbackNotReady: return "basic cleanup (model not ready)"
+        case .fallbackFailed: return "basic cleanup (rewrite failed)"
+        default: return nil
+        }
+    }
+
+    private var statusColor: Color { controller.refineHint != nil ? .orange : .primary }
+
+    private var isCleaning: Bool { if case .cleaning = controller.phase { return true } else { return false } }
 
     /// Show the evolving refined draft once a refine session is under way; the
     /// live partial otherwise.
@@ -56,7 +80,10 @@ struct RecordingHUDView: View {
                 .frame(width: 22)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(statusLine).font(.caption.weight(.semibold))
+                HStack(spacing: 6) {
+                    Text(statusLine).font(.caption.weight(.semibold)).foregroundStyle(statusColor)
+                    if isCleaning { ProgressView().controlSize(.mini) }
+                }
                 if !bodyText.isEmpty {
                     Text(bodyText)
                         .font(.caption)
@@ -81,7 +108,8 @@ struct RecordingHUDView: View {
                 Image(systemName: controller.phase.menuSymbol)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(accent)
-                Text(statusLine).font(.subheadline.weight(.semibold))
+                Text(statusLine).font(.subheadline.weight(.semibold)).foregroundStyle(statusColor)
+                if isCleaning { ProgressView().controlSize(.small) }
                 Spacer(minLength: 0)
                 LevelBar(level: controller.inputLevel, active: controller.phase.isActive)
                     .frame(width: 96, height: 14)

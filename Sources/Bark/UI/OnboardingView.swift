@@ -34,6 +34,30 @@ struct OnboardingView: View {
                   systemImage: "keyboard")
                 .font(.callout).foregroundStyle(.secondary)
 
+            #if MLXCleanup
+            // Optional, never gates onboarding: the flagship rewrite feature is a
+            // ~2.5 GB download the user would otherwise only discover in Settings.
+            Divider()
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("AI rewrite model (optional)").font(.body.weight(.medium))
+                    Text("Qwen3-4B, ~2.5 GB download — runs fully offline. Also available later in Settings.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                switch controller.llmStatus {
+                case .notLoaded:
+                    Button("Download") { controller.llmEnabled = true }   // opt-in + warm in one step
+                case .failed:
+                    Button("Retry") { controller.llmEnabled = true }
+                default:
+                    LLMStatusBadge(status: controller.llmStatus).font(.caption)
+                }
+            }
+            .padding(10)
+            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+            #endif
+
             HStack {
                 Text(controller.permissionsReady ? "You're ready!" : "Microphone is required to dictate.")
                     .font(.callout)

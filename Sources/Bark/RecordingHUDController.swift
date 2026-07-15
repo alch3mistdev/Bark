@@ -24,7 +24,10 @@ final class RecordingHUDController {
             show()
         } else {
             // Linger briefly on completed/failed so the user sees the outcome.
-            scheduleHide(after: phase.isError ? 2.5 : 0.8)
+            // A fallback note ("basic cleanup…") gets the longer error linger —
+            // it's the only place the user learns the LLM didn't run.
+            let fellBack = controller.lastCleanupOutcome?.isFallback == true
+            scheduleHide(after: phase.isError || fellBack ? 2.5 : 0.8)
         }
     }
 

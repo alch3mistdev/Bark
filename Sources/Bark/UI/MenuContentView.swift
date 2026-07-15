@@ -15,6 +15,7 @@ struct MenuContentView: View {
             }
 
             modePicker
+            llmModelBanner
 
             if !controller.liveText.isEmpty {
                 Text(controller.liveText)
@@ -92,6 +93,39 @@ struct MenuContentView: View {
         }
         .pickerStyle(.menu)
         .disabled(controller.phase.isActive)
+    }
+
+    private var selectedModeUsesLLM: Bool {
+        controller.modes.first(where: { $0.id == controller.selectedModeID })?.usesLLM ?? false
+    }
+
+    /// The selected mode wants the LLM but the model isn't ready: say so here —
+    /// the user shouldn't have to open Settings to learn why output is "basic".
+    @ViewBuilder
+    private var llmModelBanner: some View {
+        if controller.llmEnginePresent, controller.llmEnabled, selectedModeUsesLLM {
+            switch controller.llmStatus {
+            case .notLoaded, .downloading, .failed:
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        LLMStatusBadge(status: controller.llmStatus)
+                        Spacer()
+                        if case .notLoaded = controller.llmStatus {
+                            Button("Download") { controller.prepareLLM() }.controlSize(.small)
+                        } else if case .failed = controller.llmStatus {
+                            Button("Retry") { controller.prepareLLM() }.controlSize(.small)
+                        }
+                    }
+                    Text("This mode falls back to basic cleanup until the model is ready.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                .font(.caption)
+                .padding(8)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+            default:
+                EmptyView()
+            }
+        }
     }
 
     @ViewBuilder
