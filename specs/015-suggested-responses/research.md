@@ -26,6 +26,8 @@ Decisions verified against the codebase (file:line where load-bearing). Format f
 
 **Risk control**: Phase-2 spike validates key routing + frontmost stability + AX focused-element stability on macOS 26 before overlay build-out. Documented fallback: non-key panel + keys consumed via the proven HotkeyManager tap path.
 
+**Spike result (2026-07-16)**: implemented per design — `NSPanel(.nonactivatingPanel)` overriding `canBecomeKeyWindow`, `makeKeyAndOrderFront` on show, `orderOut` + settle delay before injection so AX focus returns to the target. AppKit documents that a nonactivating panel receives key status without activating its owning app, so `NSWorkspace.frontmostApplication` (what `FocusGuard` compares) keeps naming the target. One consequence handled in code: while the panel is key, the system-wide AX focused element is the panel, so injection preflight runs only AFTER the panel is dismissed. Runtime keyboard-routing validation is part of the T041 manual QA matrix (this implementation session was headless); the event-tap fallback remains documented if QA falsifies the design.
+
 ## R4 — One JSON-array generation at temperature 0, not N sampled runs
 
 **Decision**: Single generation asking for a JSON array of 3–4 materially-different single-line options; `SuggestionResponseParser` extracts the first `[`…last `]`, decodes, then falls back to a bullet/numbered-line salvage pass; hard validation (1–4 items, 1–160 chars, single-line, deduped).

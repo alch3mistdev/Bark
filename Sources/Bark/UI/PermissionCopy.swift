@@ -9,6 +9,7 @@ extension PermissionKind {
         case .microphone: "Microphone"
         case .accessibility: "Accessibility"
         case .inputMonitoring: "Input Monitoring"
+        case .screenRecording: "Screen Recording"
         }
     }
 
@@ -18,6 +19,7 @@ extension PermissionKind {
         case .microphone: "Capture your voice while dictating (audio stays on-device)."
         case .accessibility: "Type the cleaned text into the app you're using."
         case .inputMonitoring: "Detect the global push-to-talk hotkey."
+        case .screenRecording: "Read on-screen text for suggested responses when the accessibility tree is empty (optional; processed on-device)."
         }
     }
 }

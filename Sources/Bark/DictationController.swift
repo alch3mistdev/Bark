@@ -501,6 +501,7 @@ public final class DictationController {
         case .microphone:      Task { await permissions.requestMicrophone() }
         case .accessibility:   permissions.requestAccessibility()
         case .inputMonitoring: permissions.requestInputMonitoring()
+        case .screenRecording: permissions.requestScreenRecording()
         }
     }
 

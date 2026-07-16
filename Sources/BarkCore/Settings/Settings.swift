@@ -64,6 +64,15 @@ public struct Settings: Codable, Sendable, Equatable {
     public var holdToRefineEnabled: Bool   // 012: opt-in to the hold-to-refine second stage
     public var hasCompletedOnboarding: Bool
 
+    // Suggested responses (015). The external API key lives in the Keychain
+    // (`KeychainSecretStore`), never in this blob (FR-013).
+    public var suggestionsEnabled: Bool
+    public var suggestionsHotkey: HotkeySetting
+    public var suggestionBackend: SuggestionBackendID
+    public var externalLLMEndpoint: String    // OpenAI-compatible base URL, e.g. http://localhost:11434/v1
+    public var externalLLMModel: String       // chat-completions model name
+    public var suggestionAutoSubmit: Bool     // ADR-009 exception: opt-in Return after a picked suggestion
+
     public init(
         selectedModeID: String = Mode.clean.id,
         customModes: [Mode] = [],
@@ -84,7 +93,13 @@ public struct Settings: Codable, Sendable, Equatable {
         soundFeedback: Bool = true,
         enhancedHUD: Bool = false,
         holdToRefineEnabled: Bool = true,   // 012: on by default when an LLM is present (gesture is opt-in by nature)
-        hasCompletedOnboarding: Bool = false
+        hasCompletedOnboarding: Bool = false,
+        suggestionsEnabled: Bool = false,   // opt-in master switch (015)
+        suggestionsHotkey: HotkeySetting = HotkeySetting(kind: .keyToggle, keyCode: 97, modifierFlags: 0),  // F6 (F5=96 is hands-free)
+        suggestionBackend: SuggestionBackendID = .local,
+        externalLLMEndpoint: String = "",
+        externalLLMModel: String = "",
+        suggestionAutoSubmit: Bool = false
     ) {
         self.selectedModeID = selectedModeID
         self.customModes = customModes
@@ -106,6 +121,12 @@ public struct Settings: Codable, Sendable, Equatable {
         self.enhancedHUD = enhancedHUD
         self.holdToRefineEnabled = holdToRefineEnabled
         self.hasCompletedOnboarding = hasCompletedOnboarding
+        self.suggestionsEnabled = suggestionsEnabled
+        self.suggestionsHotkey = suggestionsHotkey
+        self.suggestionBackend = suggestionBackend
+        self.externalLLMEndpoint = externalLLMEndpoint
+        self.externalLLMModel = externalLLMModel
+        self.suggestionAutoSubmit = suggestionAutoSubmit
     }
 
     public static let `default` = Settings()
@@ -134,6 +155,12 @@ public struct Settings: Codable, Sendable, Equatable {
         enhancedHUD = try c.decodeIfPresent(Bool.self, forKey: .enhancedHUD) ?? d.enhancedHUD
         holdToRefineEnabled = try c.decodeIfPresent(Bool.self, forKey: .holdToRefineEnabled) ?? d.holdToRefineEnabled
         hasCompletedOnboarding = try c.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? d.hasCompletedOnboarding
+        suggestionsEnabled = try c.decodeIfPresent(Bool.self, forKey: .suggestionsEnabled) ?? d.suggestionsEnabled
+        suggestionsHotkey = try c.decodeIfPresent(HotkeySetting.self, forKey: .suggestionsHotkey) ?? d.suggestionsHotkey
+        suggestionBackend = try c.decodeIfPresent(SuggestionBackendID.self, forKey: .suggestionBackend) ?? d.suggestionBackend
+        externalLLMEndpoint = try c.decodeIfPresent(String.self, forKey: .externalLLMEndpoint) ?? d.externalLLMEndpoint
+        externalLLMModel = try c.decodeIfPresent(String.self, forKey: .externalLLMModel) ?? d.externalLLMModel
+        suggestionAutoSubmit = try c.decodeIfPresent(Bool.self, forKey: .suggestionAutoSubmit) ?? d.suggestionAutoSubmit
     }
 
     /// The mode list everything runs on: built-ins with any user prompt

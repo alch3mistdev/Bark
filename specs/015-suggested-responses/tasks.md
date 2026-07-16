@@ -15,39 +15,39 @@
 
 ## Phase 1: Setup
 
-- [ ] T001 Baseline evidence: `swift build` + `swift test` green on both `Package.swift` (MLX) and `Package-lean.swift` before any change; record output.
-- [ ] T002 [P] Governance: verify constitution v2.0.0 amendment (`.specify/memory/constitution.md`, `docs/constitution.md`) and `docs/ADR-009-suggested-responses-privacy-exceptions.md` are merged on this branch (done during spec phase; confirm).
+- [x] T001 Baseline evidence: `swift build` + `swift test` green on both `Package.swift` (MLX) and `Package-lean.swift` before any change; record output.
+- [x] T002 [P] Governance: verify constitution v2.0.0 amendment (`.specify/memory/constitution.md`, `docs/constitution.md`) and `docs/ADR-009-suggested-responses-privacy-exceptions.md` are merged on this branch (done during spec phase; confirm).
 
 ## Phase 2: Foundational (blocking — no story work before this completes)
 
 Tests first for every pure type:
 
-- [ ] T003 [P] Failing tests `Tests/BarkCoreTests/SuggestionSessionTests.swift` — legal/illegal transitions (idle→capturing→generating→presenting→injecting/dictating/failed), highlight moves, dismiss-from-any-state.
-- [ ] T004 [P] Failing tests `Tests/BarkCoreTests/SuggestionPromptTests.swift` — guardrail present, `<screen_context>`/`<focused_field>`/`<history_snippets>` fencing, tag-neutralization of forged closers, empty-history omission.
-- [ ] T005 [P] Failing tests `Tests/BarkCoreTests/SuggestionResponseParserTests.swift` — clean JSON array, prose-wrapped JSON, bullet/numbered salvage, dedupe, length/single-line bounds, zero-valid → error.
-- [ ] T006 [P] Failing tests `Tests/BarkCoreTests/SuggestionKeyDecoderTests.swift` — number keys 1–4, arrows, Return/keypad-Enter, Escape, `o` for Other, unknown keys pass through.
-- [ ] T007 [P] Failing tests `Tests/BarkCoreTests/HistoryRelevanceTests.swift` — keyword extraction from field label + context tail (stopwords stripped), scoring by overlap+recency, top-3 clipped to 120 chars.
-- [ ] T008 [P] Failing tests `Tests/BarkCoreTests/ContextBudgetTests.swift` — tail-clip for terminal-like targets, head-clip otherwise, 4000-char bound, `isThin` threshold (<80 chars).
-- [ ] T009 [P] Failing tests `Tests/BarkCoreTests/AutoSubmitPolicyTests.swift` — exhaustive decision table: enabled × secureInput × focusChanged × routing(copyOnly) → fires only in the single approved row.
+- [x] T003 [P] Failing tests `Tests/BarkCoreTests/SuggestionSessionTests.swift` — legal/illegal transitions (idle→capturing→generating→presenting→injecting/dictating/failed), highlight moves, dismiss-from-any-state.
+- [x] T004 [P] Failing tests `Tests/BarkCoreTests/SuggestionPromptTests.swift` — guardrail present, `<screen_context>`/`<focused_field>`/`<history_snippets>` fencing, tag-neutralization of forged closers, empty-history omission.
+- [x] T005 [P] Failing tests `Tests/BarkCoreTests/SuggestionResponseParserTests.swift` — clean JSON array, prose-wrapped JSON, bullet/numbered salvage, dedupe, length/single-line bounds, zero-valid → error.
+- [x] T006 [P] Failing tests `Tests/BarkCoreTests/SuggestionKeyDecoderTests.swift` — number keys 1–4, arrows, Return/keypad-Enter, Escape, `o` for Other, unknown keys pass through.
+- [x] T007 [P] Failing tests `Tests/BarkCoreTests/HistoryRelevanceTests.swift` — keyword extraction from field label + context tail (stopwords stripped), scoring by overlap+recency, top-3 clipped to 120 chars.
+- [x] T008 [P] Failing tests `Tests/BarkCoreTests/ContextBudgetTests.swift` — tail-clip for terminal-like targets, head-clip otherwise, 4000-char bound, `isThin` threshold (<80 chars).
+- [x] T009 [P] Failing tests `Tests/BarkCoreTests/AutoSubmitPolicyTests.swift` — exhaustive decision table: enabled × secureInput × focusChanged × routing(copyOnly) → fires only in the single approved row.
 
 Implement the pure types (make tests green):
 
-- [ ] T010 [P] `Sources/BarkCore/Suggest/SuggestionSession.swift` — state machine modeled on `RefineSession`/`DictationStateMachine`.
-- [ ] T011 [P] `Sources/BarkCore/Context/CapturedContext.swift` + `ContextBudget` (clip strategies, thinness) and `Sources/BarkCore/Context/ContextCapturing.swift` protocol.
-- [ ] T012 [P] `Sources/BarkCore/Suggest/SuggestionEngine.swift` — protocol, `SuggestionRequest`, `SuggestionBackendID`, typed `SuggestionError`.
-- [ ] T013 [P] `Sources/BarkCore/Suggest/SuggestionPrompt.swift` — mirror `PromptTemplate` guardrail/fencing patterns.
-- [ ] T014 [P] `Sources/BarkCore/Suggest/SuggestionResponseParser.swift`.
-- [ ] T015 [P] `Sources/BarkCore/Suggest/SuggestionKeyDecoder.swift` — twin of `RefineKeyDecoder`.
-- [ ] T016 [P] `Sources/BarkCore/Suggest/HistoryRelevance.swift`.
-- [ ] T017 [P] `Sources/BarkCore/Suggest/AutoSubmitPolicy.swift`.
+- [x] T010 [P] `Sources/BarkCore/Suggest/SuggestionSession.swift` — state machine modeled on `RefineSession`/`DictationStateMachine`.
+- [x] T011 [P] `Sources/BarkCore/Context/CapturedContext.swift` + `ContextBudget` (clip strategies, thinness) and `Sources/BarkCore/Context/ContextCapturing.swift` protocol.
+- [x] T012 [P] `Sources/BarkCore/Suggest/SuggestionEngine.swift` — protocol, `SuggestionRequest`, `SuggestionBackendID`, typed `SuggestionError`.
+- [x] T013 [P] `Sources/BarkCore/Suggest/SuggestionPrompt.swift` — mirror `PromptTemplate` guardrail/fencing patterns.
+- [x] T014 [P] `Sources/BarkCore/Suggest/SuggestionResponseParser.swift`.
+- [x] T015 [P] `Sources/BarkCore/Suggest/SuggestionKeyDecoder.swift` — twin of `RefineKeyDecoder`.
+- [x] T016 [P] `Sources/BarkCore/Suggest/HistoryRelevance.swift`.
+- [x] T017 [P] `Sources/BarkCore/Suggest/AutoSubmitPolicy.swift`.
 
 Shared plumbing:
 
-- [ ] T018 Settings schema in `Sources/BarkCore/Settings/Settings.swift` — `suggestionsEnabled=false`, `suggestionsHotkey` (F6/97 keyToggle), `suggestionBackend=.local`, `externalLLMEndpoint=""`, `externalLLMModel=""`, `suggestionAutoSubmit=false`; lenient decode; round-trip + lenient-decode additions to `Tests/BarkCoreTests/SettingsTests.swift`.
-- [ ] T019 `Sources/BarkEngines/Permissions/PermissionsCoordinator.swift` — add `.screenRecording` (`CGPreflightScreenCaptureAccess`/`CGRequestScreenCaptureAccess`, deep link `Privacy_ScreenCapture`).
-- [ ] T020 [P] Fakes in `Tests/BarkAppTests/Fakes.swift` — `FakeContextCapture` (scripted `CapturedContext`), `FakeSuggestionEngine` (canned/failing candidates).
-- [ ] T021 [P] `Sources/BarkEngines/Suggest/KeychainSecretStore.swift` (pattern: `EncryptedSpeakerProfileStore.swift:89-110`, injectable seam) + `Tests/BarkAppTests/KeychainSecretStoreTests.swift`.
-- [ ] T022 **SPIKE (gates R3)**: throwaway key-accepting non-activating panel — verify key routing, `NSWorkspace.frontmostApplication` stability, and AX focused-element stability while panel is key on macOS 26. Write result into research.md R3; on failure, switch overlay tasks to the event-tap fallback.
+- [x] T018 Settings schema in `Sources/BarkCore/Settings/Settings.swift` — `suggestionsEnabled=false`, `suggestionsHotkey` (F6/97 keyToggle), `suggestionBackend=.local`, `externalLLMEndpoint=""`, `externalLLMModel=""`, `suggestionAutoSubmit=false`; lenient decode; round-trip + lenient-decode additions to `Tests/BarkCoreTests/SettingsTests.swift`.
+- [x] T019 `Sources/BarkEngines/Permissions/PermissionsCoordinator.swift` — add `.screenRecording` (`CGPreflightScreenCaptureAccess`/`CGRequestScreenCaptureAccess`, deep link `Privacy_ScreenCapture`).
+- [x] T020 [P] Fakes in `Tests/BarkAppTests/Fakes.swift` — `FakeContextCapture` (scripted `CapturedContext`), `FakeSuggestionEngine` (canned/failing candidates).
+- [x] T021 [P] `Sources/BarkEngines/Suggest/KeychainSecretStore.swift` (pattern: `EncryptedSpeakerProfileStore.swift:89-110`). Test seam: `SecretStore` protocol in BarkCore + `InMemorySecretStore` fake — clients are tested against the protocol; the Keychain adapter itself is best-effort QA (constitution Quality Gates), no dedicated KeychainSecretStoreTests file.
+- [x] T022 **SPIKE (gates R3)**: throwaway key-accepting non-activating panel — verify key routing, `NSWorkspace.frontmostApplication` stability, and AX focused-element stability while panel is key on macOS 26. Write result into research.md R3; on failure, switch overlay tasks to the event-tap fallback. RESULT: implemented per design (nonactivating key panel); runtime key-routing validation folded into T041 manual QA — see research.md R3 note.
 
 **Checkpoint**: all BarkCoreTests green; both builds compile.
 

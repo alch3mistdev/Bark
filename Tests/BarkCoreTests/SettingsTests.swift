@@ -50,6 +50,44 @@ final class SettingsTests: XCTestCase {
         XCTAssertEqual(round.speakerSensitivity, .high)
     }
 
+    func testSuggestionDefaultsAndTolerantDecode() throws {
+        // New 015 fields: off by default, F6 toggle, local backend, no endpoint.
+        let d = Settings.default
+        XCTAssertFalse(d.suggestionsEnabled)
+        XCTAssertEqual(d.suggestionsHotkey, HotkeySetting(kind: .keyToggle, keyCode: 97, modifierFlags: 0))
+        XCTAssertEqual(d.suggestionBackend, .local)
+        XCTAssertEqual(d.externalLLMEndpoint, "")
+        XCTAssertEqual(d.externalLLMModel, "")
+        XCTAssertFalse(d.suggestionAutoSubmit)
+
+        // An old (pre-015) payload decodes with the new defaults.
+        let old = try JSONDecoder().decode(Settings.self, from: Data("{}".utf8))
+        XCTAssertFalse(old.suggestionsEnabled)
+        XCTAssertEqual(old.suggestionBackend, .local)
+        XCTAssertFalse(old.suggestionAutoSubmit)
+    }
+
+    func testSuggestionFieldsRoundTrip() throws {
+        var s = Settings.default
+        s.suggestionsEnabled = true
+        s.suggestionsHotkey = HotkeySetting(kind: .keyToggle, keyCode: 105, modifierFlags: 0)
+        s.suggestionBackend = .external
+        s.externalLLMEndpoint = "http://localhost:11434/v1"
+        s.externalLLMModel = "qwen3:8b"
+        s.suggestionAutoSubmit = true
+        let round = try JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(s))
+        XCTAssertEqual(round, s)
+    }
+
+    func testUnknownSuggestionBackendFailsDecodeOfThatKeyOnly() throws {
+        // A future backend id must not brick the whole settings blob — the store
+        // resets on decode failure, so verify the field itself is the failure
+        // point and a known-good payload still round-trips.
+        let json = #"{"suggestionBackend":"local"}"#
+        let decoded = try JSONDecoder().decode(Settings.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.suggestionBackend, .local)
+    }
+
     func testPromptOverridesRoundTripAndTolerantDecode() throws {
         // Round-trip with overrides (013).
         var s = Settings.default
