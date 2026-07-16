@@ -18,7 +18,7 @@ struct SuggestionsPane: View {
                     HotkeyRecorder(setting: $suggestions.hotkeySetting)
                 }
                 .disabled(!suggestions.enabled)
-                Text("Press the hotkey (default F6) and Bark reads the frontmost window, proposes a few "
+                Text("Press the hotkey (default ⌃⌥S) and Bark reads the frontmost window, proposes a few "
                      + "replies, and inserts the one you pick — or choose “Other…” and dictate your own. "
                      + "What Bark reads stays in memory and is never saved.")
                     .font(.caption).foregroundStyle(.secondary)

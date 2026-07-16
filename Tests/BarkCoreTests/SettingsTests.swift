@@ -54,7 +54,8 @@ final class SettingsTests: XCTestCase {
         // New 015 fields: off by default, F6 toggle, local backend, no endpoint.
         let d = Settings.default
         XCTAssertFalse(d.suggestionsEnabled)
-        XCTAssertEqual(d.suggestionsHotkey, HotkeySetting(kind: .keyToggle, keyCode: 97, modifierFlags: 0))
+        XCTAssertEqual(d.suggestionsHotkey, HotkeySetting(kind: .keyToggle, keyCode: 1, modifierFlags: 0xC0000))  // ⌃⌥S
+        XCTAssertEqual(d.suggestionsHotkey.displayName, "⌃⌥S")
         XCTAssertEqual(d.suggestionBackend, .local)
         XCTAssertEqual(d.externalLLMEndpoint, "")
         XCTAssertEqual(d.externalLLMModel, "")

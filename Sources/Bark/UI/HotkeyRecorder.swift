@@ -17,12 +17,12 @@ struct HotkeyRecorder: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityLabel("Current hotkey")
                     .accessibilityValue(setting.displayName)
-                Button(recording ? "Press a function key (F1–F20)…" : "Record") {
+                Button(recording ? "Press a function key or ⌃⌥⌘ + key…" : "Record") {
                     recording ? stop() : start()
                 }
                 .buttonStyle(.bordered)
-                .accessibilityLabel(recording ? "Recording, press a function key now" : "Record new hotkey")
-                .accessibilityHint("Only function keys (F1–F20) can be a global hotkey")
+                .accessibilityLabel(recording ? "Recording, press a hotkey now" : "Record new hotkey")
+                .accessibilityHint("A function key, or a chord such as control-option and a letter")
             }
             if let rejectionNote {
                 Text(rejectionNote)
@@ -49,24 +49,43 @@ struct HotkeyRecorder: View {
     }
 
     private func handle(_ event: NSEvent) {
-        // Modifier-hold triggers are chosen via the preset picker; the recorder
-        // only captures a function/navigation key as a toggle (a printable key
-        // would be consumed globally and become untypable).
         guard event.type == .keyDown else { return }
-        if event.keyCode == 53 { stop(); return }   // Escape cancels recording
-        guard isAllowedToggleKey(event) else {
-            // Say WHY at the point of failure instead of silently eating the key.
-            rejectionNote = "Only function keys (F1–F20) can be a global hotkey — "
-                + "a printable key would become untypable everywhere. Esc cancels."
+        if event.keyCode == 53, chordFlags(event) == 0 { stop(); return }   // bare Esc cancels
+
+        let chord = chordFlags(event)
+        if isFunctionKey(event), chord == 0 {
+            // A bare function key: fine as before.
+            commit(keyCode: event.keyCode, modifierFlags: 0)
             return
         }
+        // Otherwise require a chord with at least one of ⌃⌥⌘ — a bare printable
+        // key (or ⇧-only) would be consumed globally and become untypable.
+        if chord & 0x1C0000 != 0 {   // control | option | command
+            commit(keyCode: event.keyCode, modifierFlags: chord)
+            return
+        }
+        rejectionNote = "Use a function key, or hold ⌃, ⌥, or ⌘ with another key "
+            + "(a bare key would become untypable everywhere). Esc cancels."
+    }
+
+    private func commit(keyCode: UInt16, modifierFlags: UInt64) {
         rejectionNote = nil
-        setting = HotkeySetting(kind: .keyToggle, keyCode: UInt16(event.keyCode), modifierFlags: 0)
+        setting = HotkeySetting(kind: .keyToggle, keyCode: keyCode, modifierFlags: modifierFlags)
         stop()
     }
 
+    /// The ⌃⌥⌘⇧ subset held, as `HotkeySetting`/`CGEventFlags` raw bits.
+    private func chordFlags(_ event: NSEvent) -> UInt64 {
+        var flags: UInt64 = 0
+        if event.modifierFlags.contains(.control) { flags |= 0x40000 }
+        if event.modifierFlags.contains(.option)  { flags |= 0x80000 }
+        if event.modifierFlags.contains(.command) { flags |= 0x100000 }
+        if event.modifierFlags.contains(.shift)   { flags |= 0x20000 }
+        return flags
+    }
+
     /// Function/navigation keys live in the 0xF700–0xF8FF private-use range.
-    private func isAllowedToggleKey(_ event: NSEvent) -> Bool {
+    private func isFunctionKey(_ event: NSEvent) -> Bool {
         guard let scalar = event.charactersIgnoringModifiers?.unicodeScalars.first else { return false }
         return scalar.value >= 0xF700
     }
