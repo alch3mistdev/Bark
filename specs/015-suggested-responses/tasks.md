@@ -66,11 +66,11 @@ Shared plumbing:
 
 ## Phase 4: User Story 2 — "Other…" + opt-in auto-submit (P2)
 
-- [ ] T031 [US2] Failing flow test — select Other → one-shot hands-free starts; first `.completed` phase → `stopHandsFree()` called; `.failed` likewise.
-- [ ] T032 [US2] Phase multiplex in `Sources/Bark/BarkApp.swift` (`onPhaseChange` → HUD + SuggestionController) + one-shot logic in `SuggestionController`.
-- [ ] T033 [US2] `Sources/BarkEngines/Inject/ReturnKeySynthesizer.swift` — sole Return site (mirror `synthesizePaste` mechanics), re-runs `InjectionPreflight.check` immediately before posting; ~150 ms settle delay; wire through `AutoSubmitPolicy` in `SuggestionController`.
-- [ ] T034 [US2] Auto-submit toggle + warning copy in `SuggestionsPane`.
-- [ ] T035 [US2] Failing-then-green flow tests — auto-submit refused on: secure field, focus changed, copyOnly routing, Other/dictation path, setting off (decision-table parity with T009).
+- [x] T031 [US2] Failing flow test — select Other → one-shot hands-free starts; first `.completed` phase → `stopHandsFree()` called; `.failed` likewise.
+- [x] T032 [US2] Phase multiplex in `Sources/Bark/BarkApp.swift` (`onPhaseChange` → HUD + SuggestionController) + one-shot logic in `SuggestionController`.
+- [x] T033 [US2] `Sources/BarkEngines/Inject/ReturnKeySynthesizer.swift` — sole Return site (mirror `synthesizePaste` mechanics), re-runs `InjectionPreflight.check` immediately before posting; ~150 ms settle delay; wire through `AutoSubmitPolicy` in `SuggestionController`.
+- [x] T034 [US2] Auto-submit toggle + warning copy in `SuggestionsPane`.
+- [x] T035 [US2] Failing-then-green flow tests — auto-submit refused on: secure field, focus changed, copyOnly routing, Other/dictation path, setting off (decision-table parity with T009).
 
 **Checkpoint**: US2 scenarios pass; injectors still byte-identical (no Return in any `TextInjector`).
 
