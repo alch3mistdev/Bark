@@ -349,6 +349,16 @@ final class FakeSuggestionEngine: SuggestionEngine, @unchecked Sendable {
     }
 }
 
+/// 015: in-memory history store — seeds records for history-informed
+/// suggestion tests without crypto/Keychain/disk.
+final class InMemoryHistoryStore: HistoryStore, @unchecked Sendable {
+    private var records: [HistoryRecord]
+    init(_ records: [HistoryRecord] = []) { self.records = records }
+    func append(_ record: HistoryRecord) async throws { records.append(record) }
+    func all() async -> [HistoryRecord] { records }
+    func purge() async throws { records = [] }
+}
+
 /// 015: records Return-synthesis calls (the ADR-009 auto-submit path).
 final class FakeReturnSynthesizer: ReturnKeySynthesizing, @unchecked Sendable {
     private(set) var count = 0

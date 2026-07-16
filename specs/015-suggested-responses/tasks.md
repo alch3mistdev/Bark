@@ -76,11 +76,11 @@ Shared plumbing:
 
 ## Phase 5: User Story 3 — OCR fallback, external backend, history-informed (P2)
 
-- [ ] T036 [US3] `Sources/BarkEngines/Context/WindowOCRReader.swift` (SCK one-frame of frontmost window + Vision accurate recognition, top-to-bottom lines) + thin-context fallback in `ContextCaptureService` + JIT Screen Recording flow (T019) + permission row in `Sources/Bark/UI/Settings/PermissionsPane.swift`.
-- [ ] T037 [US3] `Sources/BarkEngines/Suggest/OpenAICompatClient.swift` — chat-completions POST, Bearer only when key exists (Ollama keyless), typed errors + `Tests/BarkAppTests/OpenAICompatClientTests.swift` via URLProtocol stub (200 / 401 / timeout / malformed JSON).
-- [ ] T038 [US3] Backend picker + endpoint/model/key fields + privacy warning (names exactly what is transmitted) in `SuggestionsPane`; key stored via `KeychainSecretStore`; local-backend row links to Models pane for `llmEnabled` consent (R12).
-- [ ] T039 [US3] External→local fallback in `SuggestionController` (R8) + flow test: external 401 → local candidates presented; local failure never calls network.
-- [ ] T040 [US3] Wire `HistoryRelevance` into the request path + flow test: seeded history + "Address" field label → history-informed candidate present; history disabled → generation unaffected.
+- [x] T036 [US3] `Sources/BarkEngines/Context/WindowOCRReader.swift` (SCK one-frame of frontmost window + Vision accurate recognition, top-to-bottom lines) + thin-context fallback in `ContextCaptureService` + JIT Screen Recording flow (T019) + permission row in `Sources/Bark/UI/Settings/PermissionsPane.swift`.
+- [x] T037 [US3] `Sources/BarkEngines/Suggest/OpenAICompatClient.swift` — chat-completions POST, Bearer only when key exists (Ollama keyless), typed errors + `Tests/BarkAppTests/OpenAICompatClientTests.swift` via URLProtocol stub (200 / 401 / timeout / malformed JSON).
+- [x] T038 [US3] Backend picker + endpoint/model/key fields + privacy warning (names exactly what is transmitted) in `SuggestionsPane`; key stored via `KeychainSecretStore`; local-backend row links to Models pane for `llmEnabled` consent (R12).
+- [x] T039 [US3] External→local fallback in `SuggestionController` (R8) + flow test: external 401 → local candidates presented; local failure never calls network.
+- [x] T040 [US3] Wire `HistoryRelevance` into the request path + flow test: seeded history + "Address" field label → history-informed candidate present; history disabled → generation unaffected.
 
 **Checkpoint**: US3 scenarios pass independently of US2.
 

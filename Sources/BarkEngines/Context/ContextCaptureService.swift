@@ -16,27 +16,43 @@ public protocol WindowOCRReading: Sendable {
 /// authorized. Returns budgeted, memory-only context.
 public final class ContextCaptureService: ContextCapturing, Sendable {
     private let ocr: WindowOCRReading?
+    private let axReader: @Sendable (InjectionTarget) -> CapturedContext?
+    private let secureInputActive: @Sendable () -> Bool
+    private let focusedRole: @MainActor () -> String?
+    private let axTrusted: @Sendable () -> Bool
 
-    public init(ocr: WindowOCRReading? = nil) {
+    /// Seams default to the real OS adapters; tests inject fakes to exercise
+    /// the refusal/fallback decision tree headlessly.
+    public init(
+        ocr: WindowOCRReading? = nil,
+        axReader: @escaping @Sendable (InjectionTarget) -> CapturedContext? = { AXContextReader.read(target: $0) },
+        secureInputActive: @escaping @Sendable () -> Bool = { SecureFieldDetector.secureInputActive() },
+        focusedRole: @escaping @MainActor () -> String? = { SecureFieldDetector.focusedElementRole() },
+        axTrusted: @escaping @Sendable () -> Bool = { AXIsProcessTrusted() }
+    ) {
         self.ocr = ocr
+        self.axReader = axReader
+        self.secureInputActive = secureInputActive
+        self.focusedRole = focusedRole
+        self.axTrusted = axTrusted
     }
 
     public func capture(target: InjectionTarget) async throws -> CapturedContext {
         // FR-004: refuse — never degrade — over secure input / password fields.
-        if SecureFieldDetector.secureInputActive() {
+        if secureInputActive() {
             throw ContextCaptureError.secureField
         }
-        let focusedRole = await MainActor.run { SecureFieldDetector.focusedElementRole() }
-        if case .refuse = SecureFieldPolicy.decide(secureInputEnabled: false, focusedElementRole: focusedRole) {
+        let role = await MainActor.run { focusedRole() }
+        if case .refuse = SecureFieldPolicy.decide(secureInputEnabled: false, focusedElementRole: role) {
             throw ContextCaptureError.secureField
         }
-        guard AXIsProcessTrusted() else {
+        guard axTrusted() else {
             throw ContextCaptureError.accessibilityDenied
         }
 
         // AX walk off the main actor (synchronous AX IPC; see AXContextReader).
-        let axContext = await Task.detached(priority: .userInitiated) {
-            AXContextReader.read(target: target)
+        let axContext = await Task.detached(priority: .userInitiated) { [axReader] in
+            axReader(target)
         }.value
 
         if let axContext, !axContext.isThin {
