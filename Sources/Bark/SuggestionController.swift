@@ -43,6 +43,8 @@ public final class SuggestionController {
     private var capturedTarget: InjectionTarget?
     private var flowTask: Task<Void, Never>?
     private var oneShotDictation = false
+    private var oneShotSawSpeech = false   // an utterance actually started in the one-shot session
+    private var passToken = 0              // invalidates a stale capture/generation pass (dismiss or a new press)
 
     /// Keychain account for the external endpoint's API key.
     public static let apiKeyAccount = "external-llm-key"
@@ -87,7 +89,23 @@ public final class SuggestionController {
 
     public var enabled: Bool {
         get { settings.settings.suggestionsEnabled }
-        set { settings.update { $0.suggestionsEnabled = newValue } }
+        set {
+            if newValue {
+                // Enabling starts a global key tap; refuse if that key already
+                // belongs to another Bark hotkey (else two taps fight over it
+                // and one silently wins — a post-upgrade regression for anyone
+                // who bound F6 pre-015).
+                let hk = settings.settings.suggestionsHotkey
+                guard hk != settings.settings.hotkey, hk != settings.settings.handsFreeHotkey else {
+                    lastError = "The suggestions hotkey collides with another Bark hotkey. Pick a different key in Settings first."
+                    return
+                }
+            }
+            settings.update { $0.suggestionsEnabled = newValue }
+            // The tap runs only while the feature is on, so F6 (or the chosen
+            // key) reaches other apps normally when it's off.
+            newValue ? hotkey.start() : hotkey.stop()
+        }
     }
 
     /// 3-way collision guard: the suggestions key must not shadow push-to-talk
@@ -152,7 +170,9 @@ public final class SuggestionController {
         hotkey.onStop = { [weak self] in
             Task { @MainActor in self?.handleHotkey() }
         }
-        hotkey.start()
+        // Only claim the global key while the feature is enabled — otherwise the
+        // tap would swallow the key system-wide for a feature that's off.
+        if settings.settings.suggestionsEnabled { hotkey.start() }
     }
 
     public func deactivate() {
@@ -176,19 +196,25 @@ public final class SuggestionController {
         guard let target = targetProvider(),
               target.pid != ProcessInfo.processInfo.processIdentifier else { return }  // never suggest into Bark itself
         capturedTarget = target
+        passToken += 1
+        let token = passToken
         session.handle(.hotkeyPressed)
         publish()
         // Warm the shared local model so load overlaps capture (R2).
         if settings.settings.suggestionBackend == .local, localEngineUsable {
             dictation.prepareLLM()
         }
-        flowTask = Task { await runFlow(target: target) }
+        flowTask = Task { await runFlow(target: target, token: token) }
     }
 
-    private func runFlow(target: InjectionTarget) async {
+    /// `token` pins this pass: a dismiss or a newer press bumps `passToken`, so
+    /// a stale capture/generation that finishes late can't advance (or inject
+    /// into) a different session — the phase guards alone can't tell passes
+    /// apart because the callees don't honor cancellation.
+    private func runFlow(target: InjectionTarget, token: Int) async {
         do {
             let context = try await capture.capture(target: target)
-            guard session.phase == .capturing else { return }   // dismissed mid-capture
+            guard token == passToken, session.phase == .capturing else { return }   // stale or dismissed
             session.handle(.contextCaptured)
             publish()
 
@@ -196,7 +222,7 @@ public final class SuggestionController {
             let request = SuggestionPrompt.build(context: context, historySnippets: snippets)
             let raw = try await generate(request)
 
-            guard session.phase == .generating else { return }  // dismissed mid-generation
+            guard token == passToken, session.phase == .generating else { return }  // stale or dismissed
             let candidates = SuggestionResponseParser.parse(raw)
             guard !candidates.isEmpty else {
                 fail("Couldn't produce suggestions for this screen."); return
@@ -204,12 +230,12 @@ public final class SuggestionController {
             session.handle(.candidatesReady(candidates))
             publish()
         } catch let error as ContextCaptureError {
-            guard session.isActive else { return }
+            guard token == passToken, session.isActive else { return }
             fail(Self.captureMessage(error))
         } catch is CancellationError {
             // dismissed — session already reset
         } catch {
-            guard session.isActive else { return }
+            guard token == passToken, session.isActive else { return }
             fail(Self.generationMessage(error))
         }
     }
@@ -231,11 +257,16 @@ public final class SuggestionController {
             }
             do {
                 return try await run(engine, request)
+            } catch let error as CancellationError {
+                throw error   // dismissed — don't spin up a fallback
             } catch {
                 // R8: retry on-device when possible; local errors never escalate
-                // to the network.
+                // to the network. Kick the model load first — with an external
+                // backend the local model is never warmed at start(), so
+                // `run` would otherwise poll a cold engine until the deadline.
                 if localEngineUsable, let local = localEngine {
                     BarkLog.cleanup.error("external suggestion engine failed; falling back to local")
+                    dictation.prepareLLM()
                     return try await run(local, request)
                 }
                 throw error
@@ -304,8 +335,10 @@ public final class SuggestionController {
 
     public func dismiss() {
         flowTask?.cancel(); flowTask = nil
+        passToken += 1   // invalidate any in-flight capture/generation pass
         if oneShotDictation {
             oneShotDictation = false
+            oneShotSawSpeech = false
             dictation.stopHandsFree()
         }
         capturedTarget = nil
@@ -317,9 +350,10 @@ public final class SuggestionController {
 
     /// Reuses the whole hands-free path (VAD → STT → cleanup → inject) for one
     /// utterance (R9). `notifyDictationPhase` (multiplexed from the app layer)
-    /// ends the session on the first completed/failed utterance.
+    /// ends the session after the first utterance, however it terminates.
     private func startOtherDictation() {
         oneShotDictation = true
+        oneShotSawSpeech = false
         dictation.startHandsFree()
         // startHandsFree refuses (no mic / model not ready) by going .failed —
         // notifyDictationPhase picks that up; if it never even flipped to
@@ -332,16 +366,31 @@ public final class SuggestionController {
     }
 
     /// Fed every dictation phase change by the app layer (BarkApp multiplex).
+    /// A one-shot "Other…" must end after ONE utterance no matter how the
+    /// hands-free loop terminates — a successful `.completed`, a `.failed`, OR a
+    /// reset to `.idle` (per-utterance injection refusal, manual F5 stop, audio
+    /// device loss). Missing the `.idle` paths left the latch stuck, the mic
+    /// hot, and later killed unrelated hands-free sessions.
     public func notifyDictationPhase(_ phase: DictationPhase) {
-        guard oneShotDictation, session.phase == .dictating else { return }
+        guard oneShotDictation else { return }
         switch phase {
+        case .listening, .transcribing, .cleaning, .injecting:
+            oneShotSawSpeech = true
         case .completed, .failed:
-            oneShotDictation = false
-            dictation.stopHandsFree()
+            endOneShot()
+        case .idle:
+            if oneShotSawSpeech || !dictation.handsFreeActive { endOneShot() }
+        }
+    }
+
+    private func endOneShot() {
+        guard oneShotDictation else { return }
+        oneShotDictation = false
+        oneShotSawSpeech = false
+        dictation.stopHandsFree()
+        if session.phase == .dictating {
             session.handle(.dictationFinished)
             publish()
-        default:
-            break
         }
     }
 
@@ -355,8 +404,11 @@ public final class SuggestionController {
         }
         let text = session.candidates[index]
         // The overlay just resigned key; give focus a beat to return to the
-        // target before the preflight compares it (R3).
+        // target before the preflight compares it (R3). If the user dismissed
+        // during that beat (flowTask cancelled), inject nothing — otherwise we'd
+        // paste (and possibly auto-submit) text they just cancelled.
         try? await Task.sleep(for: settleDelay)
+        guard !Task.isCancelled, capturedTarget != nil else { return }
 
         let sanitized = TextSanitizer.sanitize(
             text,
@@ -392,6 +444,7 @@ public final class SuggestionController {
         )
         guard approved else { return }
         try? await Task.sleep(for: settleDelay)   // let the paste/keystrokes land first
+        guard !Task.isCancelled else { return }   // dismissed during the settle → don't submit
         do {
             try await returnSynthesizer.postReturn(plan: InjectionPlan(target: target, strategy: strategy))
         } catch {

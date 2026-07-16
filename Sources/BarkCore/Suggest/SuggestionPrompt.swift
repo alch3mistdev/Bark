@@ -69,9 +69,17 @@ public enum SuggestionPrompt {
     }
 
     /// Strip every fence-tag literal so no field can forge or unbalance any
-    /// block's delimiters (mirrors `PromptTemplate.stripFenceTags`).
-    private static func neutralize(_ s: String) -> String {
-        [contextOpenTag, contextCloseTag, fieldOpenTag, fieldCloseTag, historyOpenTag, historyCloseTag]
-            .reduce(s) { $0.replacingOccurrences(of: $1, with: "") }
+    /// block's delimiters. Loops to a fixed point: a single pass would let
+    /// overlapping/nested literals (e.g. `</screen_c</screen_context>ontext>`)
+    /// reassemble into a real closing fence and break the model out of the data
+    /// block (OWASP LLM01). Repeat until no tag literal remains.
+    static func neutralize(_ s: String) -> String {
+        let tags = [contextOpenTag, contextCloseTag, fieldOpenTag, fieldCloseTag, historyOpenTag, historyCloseTag]
+        var result = s
+        while true {
+            let next = tags.reduce(result) { $0.replacingOccurrences(of: $1, with: "") }
+            if next == result { return next }
+            result = next
+        }
     }
 }

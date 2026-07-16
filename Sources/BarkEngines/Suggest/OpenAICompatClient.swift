@@ -72,13 +72,20 @@ public final class OpenAICompatClient: SuggestionEngine, Sendable {
         return content
     }
 
-    /// Accepts a base URL with or without `/v1` or a trailing slash.
+    /// Builds the chat-completions URL from a user-provided base. Accepts a full
+    /// path, a version base (`…/v1`), or a bare host — a bare host with no path
+    /// gets `/v1/chat/completions` (the OpenAI/Ollama/LM Studio convention) so
+    /// "http://localhost:11434" doesn't 404; anything with a path only gets
+    /// `/chat/completions` appended (respecting a caller who already chose `/v1`
+    /// or a custom prefix).
     static func chatCompletionsURL(base: String) -> URL? {
         var trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         while trimmed.hasSuffix("/") { trimmed.removeLast() }
         if trimmed.hasSuffix("/chat/completions") { return URL(string: trimmed) }
-        return URL(string: trimmed + "/chat/completions")
+        guard let url = URL(string: trimmed) else { return nil }
+        let hasPath = !url.path.isEmpty && url.path != "/"
+        return URL(string: trimmed + (hasPath ? "/chat/completions" : "/v1/chat/completions"))
     }
 
     // MARK: - Wire types (OpenAI chat-completions subset)

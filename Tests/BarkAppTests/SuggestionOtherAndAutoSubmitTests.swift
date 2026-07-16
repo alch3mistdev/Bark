@@ -43,7 +43,9 @@ final class SuggestionOtherAndAutoSubmitTests: XCTestCase {
         autoSubmit: Bool = false,
         routing: OutputRouting = .insert,
         micGranted: Bool = true,
-        raw: String = #"["Run the tests", "Ship it"]"#
+        raw: String = #"["Run the tests", "Ship it"]"#,
+        settleDelay: Duration = .zero,
+        handsFreeScript: [Float]? = nil
     ) async -> Harness {
         let settings = SettingsStore(defaults: UserDefaults(suiteName: "sug-us2-\(UUID().uuidString)")!, key: "k")
         settings.update {
@@ -58,7 +60,7 @@ final class SuggestionOtherAndAutoSubmitTests: XCTestCase {
         let secureFlag = SecureFlag()
 
         let dictationInjector = FakeInjector()
-        let script = oneUtterance
+        let script = handsFreeScript ?? oneUtterance
         let dictation = DictationController(
             settings: settings, permissions: perms, hotkey: HotkeyManager(),
             stt: FakeSTTEngine(finalText: "my custom reply"), handsFreeHotkey: HotkeyManager(),
@@ -81,7 +83,7 @@ final class SuggestionOtherAndAutoSubmitTests: XCTestCase {
             clipboardInjector: suggestionInjector, returnSynthesizer: returnSynth,
             targetProvider: { [targetBox] in targetBox.target },
             secureInputCheck: { [secureFlag] in secureFlag.active },
-            generationDeadline: 5, settleDelay: .zero
+            generationDeadline: 5, settleDelay: settleDelay
         )
         // The BarkApp multiplex, reproduced for tests (T032).
         dictation.onPhaseChange = { [weak suggestions] phase in
@@ -141,6 +143,26 @@ final class SuggestionOtherAndAutoSubmitTests: XCTestCase {
         h.suggestions.dismiss()
         XCTAssertEqual(h.suggestions.session.phase, .idle)
         XCTAssertFalse(h.dictation.handsFreeActive)
+    }
+
+    /// Regression: a one-shot "Other…" that ends via a manual hands-free stop
+    /// (phase → .idle, not .completed) must still clear the latch and end the
+    /// suggestion session — else it sticks in .dictating with the mic hot and a
+    /// later unrelated hands-free session gets killed by the stale latch.
+    /// Silence script → no utterance fires, so the stop is unambiguously manual.
+    func testOneShotClearsLatchWhenHandsFreeStoppedManually() async {
+        let h = await make(handsFreeScript: [Float](repeating: 0, count: 40))
+        h.suggestions.handleHotkey()
+        await waitFor(h.suggestions.session.phase == .presenting)
+        h.suggestions.chooseOther()
+        await waitFor(h.dictation.handsFreeActive)
+        XCTAssertEqual(h.suggestions.session.phase, .dictating)
+
+        // User stops hands-free themselves (F5); no utterance ever spoke.
+        h.dictation.stopHandsFree()
+        await waitFor(h.suggestions.session.phase == .idle)   // latch cleared, session ended
+        XCTAssertFalse(h.dictation.handsFreeActive)
+        XCTAssertEqual(h.dictationInjector.count, 0)          // nothing was dictated
     }
 
     // MARK: - Auto-submit (T033/T035)

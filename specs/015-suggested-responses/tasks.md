@@ -90,7 +90,7 @@ Shared plumbing:
 - [x] T042 [P] Overlay accessibility (VoiceOver labels on rows/states, per 014 conventions) + visual polish.
 - [x] T043 [P] Docs: SECURITY.md residuals (Return remap best-effort; external endpoint operator visibility), README feature blurb.
 - [x] T044 Evidence: `swift build` + `swift test` output on both configs; SC-002 grep proof (no captured context on disk).
-- [ ] T045 Adversarial review (Codex + ef-adversary) on the diff; fix or document flagged items.
+- [x] T045 Adversarial review (Codex + ef-adversary) on the diff; fix or document flagged items.
 
 ---
 

@@ -25,15 +25,22 @@ final class SuggestionOverlayController: NSObject, NSWindowDelegate {
     func handleSession(_ session: SuggestionSession) {
         switch session.phase {
         case .capturing:
-            show(session)
-        case .generating, .presenting, .failed:
-            update(session)
+            // Show WITHOUT taking key: while the flow reads the system-wide AX
+            // focused element (secure-field check + field metadata), the target
+            // app must stay focused. A key panel would make Bark's own panel the
+            // focused element and defeat the secure-field guard (R3).
+            show(session, takeKey: false)
+        case .generating:
+            update(session, takeKey: false)
+        case .presenting, .failed:
+            // Capture is done; now take key so 1–4/arrows/Return/Esc work.
+            update(session, takeKey: true)
         case .idle, .injecting, .dictating:
             hide()
         }
     }
 
-    private func show(_ session: SuggestionSession) {
+    private func show(_ session: SuggestionSession, takeKey: Bool) {
         let panel = panel ?? makePanel()
         self.panel = panel
         resize(panel, for: session)
@@ -42,7 +49,11 @@ final class SuggestionOverlayController: NSObject, NSWindowDelegate {
         // refine to a caret anchor off the main actor — the HUD's pattern.
         panel.setFrameOrigin(HUDPlacement.bottomCenter(
             panelSize: panel.frame.size, visibleFrame: fallbackVisibleFrame()))
-        panel.makeKeyAndOrderFront(nil)   // key WITHOUT activating Bark (R3)
+        if takeKey {
+            panel.makeKeyAndOrderFront(nil)   // key WITHOUT activating Bark (R3)
+        } else {
+            panel.orderFront(nil)             // visible but never key — keep target focus
+        }
 
         positionToken += 1
         guard !SecureFieldDetector.secureInputActive() else { return }
@@ -53,9 +64,10 @@ final class SuggestionOverlayController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func update(_ session: SuggestionSession) {
-        guard let panel, panel.isVisible else { show(session); return }
+    private func update(_ session: SuggestionSession, takeKey: Bool) {
+        guard let panel, panel.isVisible else { show(session, takeKey: takeKey); return }
         resize(panel, for: session)
+        if takeKey, !panel.isKeyWindow { panel.makeKeyAndOrderFront(nil) }
     }
 
     private func hide() {

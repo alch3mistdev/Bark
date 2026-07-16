@@ -134,6 +134,14 @@ final class OpenAICompatClientTests: XCTestCase {
                        "http://x/v1/chat/completions")
         XCTAssertEqual(OpenAICompatClient.chatCompletionsURL(base: "http://x/v1/chat/completions")?.absoluteString,
                        "http://x/v1/chat/completions")
+        // A bare host (no path) gets /v1 injected so it doesn't 404 on Ollama.
+        XCTAssertEqual(OpenAICompatClient.chatCompletionsURL(base: "http://localhost:11434")?.absoluteString,
+                       "http://localhost:11434/v1/chat/completions")
+        XCTAssertEqual(OpenAICompatClient.chatCompletionsURL(base: "http://localhost:11434/")?.absoluteString,
+                       "http://localhost:11434/v1/chat/completions")
+        // A custom path prefix is respected (only /chat/completions appended).
+        XCTAssertEqual(OpenAICompatClient.chatCompletionsURL(base: "http://gw/api/openai")?.absoluteString,
+                       "http://gw/api/openai/chat/completions")
         XCTAssertNil(OpenAICompatClient.chatCompletionsURL(base: "   "))
     }
 }

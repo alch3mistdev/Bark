@@ -49,13 +49,13 @@ public extension SuggestionEngine {
 
 public enum SuggestionError: Error, Sendable, Equatable {
     case engineUnavailable
-    case timedOut
-    case noValidCandidates
-    case emptyContext
     case endpointNotConfigured
     case http(Int)                 // non-2xx from the external endpoint
     case network(String)           // transport failure
     case badResponse(String)       // endpoint replied with an unparseable body
+    // Note: generation timeout surfaces as CleanupError.timedOut (the shared
+    // `withThrowingDeadline`); a zero-candidate parse surfaces as a UI error
+    // string, not a thrown error — so no cases exist for those here.
 }
 
 /// Stores the external endpoint's API key. Real impl (`KeychainSecretStore`,

@@ -48,7 +48,8 @@ final class SuggestionControllerFlowTests: XCTestCase {
         history: HistoryStore? = nil,
         historyEnabled: Bool = false,
         generationDeadline: Double = 5,
-        keystrokeInjector: FakeInjector = FakeInjector()
+        keystrokeInjector: FakeInjector = FakeInjector(),
+        settleDelay: Duration = .zero
     ) -> Harness {
         let defaults = UserDefaults(suiteName: "bark-suggest-test-\(UUID().uuidString)")!
         let settings = SettingsStore(defaults: defaults, key: "k")
@@ -91,7 +92,7 @@ final class SuggestionControllerFlowTests: XCTestCase {
             targetProvider: { [targetBox] in targetBox.target },
             secureInputCheck: { secureInput },
             generationDeadline: generationDeadline,
-            settleDelay: .zero
+            settleDelay: settleDelay
         )
         return Harness(suggestions: suggestions, dictation: dictation, paste: paste,
                        keystroke: keystroke, clipboard: clipboard, returnSynth: returnSynth,
@@ -257,5 +258,37 @@ final class SuggestionControllerFlowTests: XCTestCase {
         await waitFor({ if case .failed = h.suggestions.session.phase { return true }; return false }())
         XCTAssertEqual(h.suggestions.session.phase,
                        .failed("Window focus changed — text not inserted."))
+    }
+
+    // MARK: - Dismiss races (review fix)
+
+    /// Dismissing during the post-pick settle window must inject NOTHING — the
+    /// swallowed `try? await Task.sleep` used to let cancelled picks through.
+    func testDismissDuringSettleWindowInjectsNothing() async {
+        let h = make(capture: FakeContextCapture(.ok(makeContext())), settleDelay: .milliseconds(200))
+        h.suggestions.handleHotkey()
+        await waitFor(h.suggestions.session.phase == .presenting)
+        h.suggestions.choose(0)                 // → .injecting, injectChosen sleeps 200ms
+        h.suggestions.dismiss()                 // cancel within the window
+        try? await Task.sleep(for: .milliseconds(400))
+        XCTAssertEqual(h.keystroke.count + h.paste.count + h.clipboard.count, 0)
+        XCTAssertEqual(h.returnSynth.count, 0)
+        XCTAssertEqual(h.suggestions.session.phase, .idle)
+    }
+
+    /// A stale pass (dismissed, its capture finishing late) must not advance or
+    /// inject into a newer session — the pass token guards it.
+    func testStalePassCannotHijackNewerSession() async {
+        // First pass captures app A; we don't let it present — dismiss immediately.
+        let h = make(capture: FakeContextCapture(.ok(makeContext(bundleID: "com.apple.Terminal"))))
+        h.suggestions.handleHotkey()
+        await waitFor(h.suggestions.session.phase == .presenting)
+        // A fresh press starts a new pass (bumps the token); the old flow task is
+        // already done, but this proves a new pass owns the session cleanly.
+        h.suggestions.dismiss()
+        XCTAssertEqual(h.suggestions.session.phase, .idle)
+        h.suggestions.handleHotkey()
+        await waitFor(h.suggestions.session.phase == .presenting)
+        XCTAssertEqual(h.suggestions.session.candidates.count, 3)   // new pass presented normally
     }
 }

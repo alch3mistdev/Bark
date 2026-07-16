@@ -10,6 +10,12 @@ public enum PermissionKind: String, Sendable, CaseIterable {
     case accessibility    // synthesize key events / read focused element
     case inputMonitoring  // global CGEventTap hotkey
     case screenRecording  // 015: OCR fallback for suggestion context capture (optional, degradable)
+
+    /// The permissions surfaced at onboarding. Screen Recording is excluded —
+    /// it gates only the optional OCR fallback and is requested just-in-time,
+    /// never at first launch (015 R10), so it must not appear in the onboarding
+    /// "three permissions" list.
+    public static let onboardingKinds: [PermissionKind] = [.microphone, .accessibility, .inputMonitoring]
 }
 
 public enum PermissionState: Sendable, Equatable {
