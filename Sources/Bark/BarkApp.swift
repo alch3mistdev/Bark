@@ -21,18 +21,34 @@ struct BarkApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    let controller = CompositionRoot.makeController()
+    let controller: DictationController
+    let suggestions: SuggestionController
     private var onboardingWindow: NSWindow?
-    private lazy var windowManager = WindowManager(controller: controller)
+    private lazy var windowManager = WindowManager(controller: controller, suggestions: suggestions)
     private lazy var hud = RecordingHUDController(controller: controller)
+    private lazy var suggestionOverlay = SuggestionOverlayController(controller: suggestions)
+
+    override init() {
+        let made = CompositionRoot.makeControllers()
+        controller = made.dictation
+        suggestions = made.suggestions
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Menu-bar utility: no Dock icon, no main window.
         NSApp.setActivationPolicy(.accessory)
         controller.onOpenSettings = { [weak self] in self?.windowManager.openSettings() }
-        controller.onPhaseChange = { [weak self] phase in self?.hud.handlePhase(phase) }
+        // Multiplex phase changes: the HUD, and the suggestion controller's
+        // one-shot "Other…" dictation (015 R9).
+        controller.onPhaseChange = { [weak self] phase in
+            self?.hud.handlePhase(phase)
+            self?.suggestions.notifyDictationPhase(phase)
+        }
         controller.onHandsFreeChange = { [weak self] active in self?.hud.setHandsFree(active) }
+        suggestions.onSessionChange = { [weak self] session in self?.suggestionOverlay.handleSession(session) }
         controller.activate()
+        suggestions.activate()
         if !controller.hasCompletedOnboarding {
             showOnboarding()
         }

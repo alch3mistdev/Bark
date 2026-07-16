@@ -22,7 +22,9 @@ public actor MLXTextCleaner: TextCleaner {
     public static let defaultModelID = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
 
     private let modelID: String
-    private var container: ModelContainer?
+    // Internal (not private): the SuggestionEngine conformance in
+    // MLXTextCleaner+Suggest.swift shares this one residency (015 R2).
+    var container: ModelContainer?
 
     public init(modelID: String = MLXTextCleaner.defaultModelID) {
         self.modelID = modelID

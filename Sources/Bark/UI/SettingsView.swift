@@ -5,6 +5,7 @@ import BarkCore
 /// own file under `UI/Settings/` (014 split of the former 900-line monolith).
 struct SettingsView: View {
     @Bindable var controller: DictationController
+    @Bindable var suggestions: SuggestionController
     @State private var pane: Pane = .general
 
     /// Single source of truth for the settings window size — `WindowManager`
@@ -12,7 +13,7 @@ struct SettingsView: View {
     static let windowSize = CGSize(width: 480, height: 430)
 
     enum Pane: String, CaseIterable, Identifiable {
-        case general, hotkey, modes, models, history, permissions, privacy
+        case general, hotkey, modes, models, suggest, history, permissions, privacy
         var id: String { rawValue }
         var icon: String {
             switch self {
@@ -20,6 +21,7 @@ struct SettingsView: View {
             case .hotkey: "keyboard"
             case .modes: "slider.horizontal.3"
             case .models: "externaldrive.badge.checkmark"
+            case .suggest: "text.bubble"
             case .history: "clock"
             case .permissions: "lock.shield"
             case .privacy: "hand.raised"
@@ -31,6 +33,7 @@ struct SettingsView: View {
             case .hotkey: "Hotkey"
             case .modes: "Modes"
             case .models: "Models"
+            case .suggest: "Suggest"
             case .history: "History"
             case .permissions: "Permissions"
             case .privacy: "Privacy"
@@ -51,7 +54,7 @@ struct SettingsView: View {
                             Text(item.title)
                                 .font(.system(size: 9))
                         }
-                        .frame(width: 58, height: 42)
+                        .frame(width: 52, height: 42)   // 8 tabs must fit the 480 pt window (015)
                         .background(pane == item ? Color.accentColor.opacity(0.18) : .clear,
                                     in: RoundedRectangle(cornerRadius: 7))
                         .foregroundStyle(pane == item ? Color.accentColor : .secondary)
@@ -74,6 +77,7 @@ struct SettingsView: View {
                 case .hotkey: HotkeyPane(controller: controller)
                 case .modes: ModesPane(controller: controller)
                 case .models: ModelsPane()
+                case .suggest: SuggestionsPane(controller: controller, suggestions: suggestions)
                 case .history: HistoryPane(controller: controller)
                 case .permissions: PermissionsPane(controller: controller)
                 case .privacy: PrivacyPane()

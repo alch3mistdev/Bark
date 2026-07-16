@@ -349,6 +349,16 @@ final class FakeSuggestionEngine: SuggestionEngine, @unchecked Sendable {
     }
 }
 
+/// 015: records Return-synthesis calls (the ADR-009 auto-submit path).
+final class FakeReturnSynthesizer: ReturnKeySynthesizing, @unchecked Sendable {
+    private(set) var count = 0
+    private(set) var lastPlan: InjectionPlan?
+    func postReturn(plan: InjectionPlan) async throws {
+        count += 1
+        lastPlan = plan
+    }
+}
+
 /// 015: in-memory secret store — client/settings tests never touch the Keychain.
 final class InMemorySecretStore: SecretStore, @unchecked Sendable {
     private var storage: [String: String] = [:]

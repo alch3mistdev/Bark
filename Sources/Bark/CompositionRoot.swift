@@ -10,6 +10,25 @@ import BarkCleanupMLX
 /// or cleaner here without touching the pipeline (ADR-002 / ADR-003 / ADR-006).
 @MainActor
 enum CompositionRoot {
+    /// Build the dictation conductor and the suggestion controller together so
+    /// they share the settings store, history store, and (in the MLX build)
+    /// the ONE loaded LLM residency (015 R1/R2).
+    static func makeControllers() -> (dictation: DictationController, suggestions: SuggestionController) {
+        let dictation = makeController()
+        let suggestions = SuggestionController(
+            settings: dictation.settings,
+            dictation: dictation,
+            hotkey: HotkeyManager(),
+            capture: ContextCaptureService(ocr: WindowOCRReader()),
+            localEngine: dictation.sharedSuggestionEngine,
+            externalEngineProvider: { endpoint, model, apiKey in
+                OpenAICompatClient(endpoint: endpoint, model: model, apiKey: apiKey)
+            },
+            history: dictation.sharedHistoryStore
+        )
+        return (dictation, suggestions)
+    }
+
     static func makeController() -> DictationController {
         let settings = SettingsStore()
         let permissions = PermissionsCoordinator()

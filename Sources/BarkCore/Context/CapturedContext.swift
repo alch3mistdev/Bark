@@ -49,6 +49,9 @@ public struct CapturedContext: Sendable, Equatable {
         usefulCharCount < ContextBudget.thinThreshold
     }
 
+    /// Literally nothing to prompt on (AX and OCR both empty → honest error).
+    public var isEmptyOfText: Bool { usefulCharCount == 0 }
+
     /// Non-whitespace characters across window text + field metadata.
     private var usefulCharCount: Int {
         [windowText, fieldValue, fieldLabel, fieldPlaceholder]
