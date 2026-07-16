@@ -44,7 +44,7 @@ Decisions verified against the codebase (file:line where load-bearing). Format f
 
 **Decision**: `ReturnKeySynthesizer` (BarkEngines) is the sole Return-posting site, called by `SuggestionController` only when `AutoSubmitPolicy` approves: setting ON ∧ a *selected* suggestion inserted successfully ∧ preflight re-passed (focus + secure field, after insertion, before keypress) ∧ ~150 ms settle delay. Not an `InjectionPlan` flag.
 
-**Rationale**: The `TextInjector` contract ("never posts Return", TextInjector.swift:8; PasteboardInjector.swift:86) stays byte-identical; the ADR-009/SEC-005 exception is confined to one auditable file. Terminals deliberately allowed — the coding-agent scenario is the point; the user read and chose the exact string (per-use consent).
+**Rationale**: The `TextInjector` contract ("never posts Return", TextInjector.swift:8; PasteboardInjector.swift:86) stays byte-identical; the ADR-010/SEC-005 exception is confined to one auditable file. Terminals deliberately allowed — the coding-agent scenario is the point; the user read and chose the exact string (per-use consent).
 
 ## R7 — Context is ephemeral and prompt-fenced
 

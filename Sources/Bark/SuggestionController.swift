@@ -378,7 +378,7 @@ public final class SuggestionController {
         }
     }
 
-    /// ADR-009 / FR-012: opt-in Return after a picked suggestion. The pure
+    /// ADR-010 / FR-012: opt-in Return after a picked suggestion. The pure
     /// policy gates here; `ReturnKeySynthesizer` re-runs the full preflight
     /// immediately before the keypress. Failure is best-effort (the text is
     /// already inserted) — logged, never fatal.

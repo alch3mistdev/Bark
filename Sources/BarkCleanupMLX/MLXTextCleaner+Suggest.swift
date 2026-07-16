@@ -48,7 +48,14 @@ extension MLXTextCleaner: SuggestionEngine {
 
 /// Lean build: the local suggestion engine is absent; `SuggestionController`
 /// degrades to the external backend or an honest unavailable state (SC-005).
+/// `prepare`/`unload` are written out because BOTH protocols supply defaults —
+/// without explicit witnesses the two extension defaults are ambiguous and
+/// neither conformance can be satisfied.
 extension MLXTextCleaner: SuggestionEngine {
+    public func prepare(progress: @escaping @Sendable (Double) -> Void) async throws {}
+
+    public func unload() async {}
+
     public func suggest(_ request: SuggestionRequest) async throws -> String {
         throw SuggestionError.engineUnavailable
     }

@@ -6,7 +6,7 @@ import XCTest
 /// US2 flow tests (015 T031/T035): "Other…" runs ONE hands-free utterance and
 /// stops; auto-submit posts Return only in the single approved case — never on
 /// the dictation path, secure input, focus drift, clipboard routing, or with
-/// the setting off (ADR-009 / FR-011 / FR-012).
+/// the setting off (ADR-010 / FR-011 / FR-012).
 @MainActor
 final class SuggestionOtherAndAutoSubmitTests: XCTestCase {
     private let terminalTarget = InjectionTarget(pid: 4242, bundleID: "com.apple.Terminal")

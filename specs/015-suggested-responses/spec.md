@@ -12,11 +12,11 @@
 
 ### Session 2026-07-16
 
-- Q: LLM engine policy for suggestion generation? → A: Local MLX plus a user-configurable external OpenAI-compatible endpoint (covers Ollama and cloud); opt-in toggle with a privacy warning in settings; constitution amended (v2.0.0, ADR-009). ACP bridge to CLI agents: research only, deferred.
+- Q: LLM engine policy for suggestion generation? → A: Local MLX plus a user-configurable external OpenAI-compatible endpoint (covers Ollama and cloud); opt-in toggle with a privacy warning in settings; constitution amended (v2.0.0, ADR-010). ACP bridge to CLI agents: research only, deferred.
 - Q: How to capture screen context? → A: Accessibility (AX) tree first — focused element value/label/title plus window text; OCR fallback (window screenshot + on-device text recognition) when AX yields thin or no text. Both offline. Capture refused over secure fields.
 - Q: Personal-data memory for suggestions (address example)? → A: History-informed only in v1 — relevant snippets from the existing encrypted dictation history feed the suggestion prompt. No new memory store.
 - Q: How does the chosen suggestion reach the target app? → A: Through the existing output-routing pipeline (insert at cursor vs clipboard-only, terminal keystroke vs paste), unchanged.
-- Q: Auto-submit — it does not exist today (injectors never post Return, SEC-005/T-006)? → A: Add as an opt-in setting for this feature only, default OFF, warning copy in settings, documented SEC-005/Principle IV exception (ADR-009).
+- Q: Auto-submit — it does not exist today (injectors never post Return, SEC-005/T-006)? → A: Add as an opt-in setting for this feature only, default OFF, warning copy in settings, documented SEC-005/Principle IV exception (ADR-010).
 - Q: How far to run speckit this cycle? → A: Spec + plan + tasks now; implementation via /speckit-implement later.
 
 ## User Scenarios & Testing *(mandatory)*
@@ -103,7 +103,7 @@ A user focuses an "Address" field in a browser form and presses the hotkey. Bark
 - **FR-009**: The overlay MUST present the candidates plus an "Other…" option, support selection by number keys, arrow keys + Return, and mouse click, dismiss on Escape or focus loss, and MUST NOT steal focus from the target app while showing.
 - **FR-010**: A selected suggestion MUST be delivered through the existing output-routing pipeline (insert vs clipboard-only; terminal keystroke vs paste), inheriting all existing injection safeguards (sanitization, clipboard snapshot/restore, focus re-verification, secure-field refusal).
 - **FR-011**: Selecting "Other…" MUST start a one-shot dictation session targeting the originally captured app, ending automatically after the first completed or failed utterance.
-- **FR-012**: An opt-in auto-submit setting (default OFF, with warning copy) MUST, after successful insertion of a selected suggestion only, re-run injection preflight (focus unchanged, no secure field, no Secure Input) and post a single Return keypress; Return synthesis MUST be confined to one dedicated component and MUST never occur on the dictation path or under clipboard-only routing (ADR-009).
+- **FR-012**: An opt-in auto-submit setting (default OFF, with warning copy) MUST, after successful insertion of a selected suggestion only, re-run injection preflight (focus unchanged, no secure field, no Secure Input) and post a single Return keypress; Return synthesis MUST be confined to one dedicated component and MUST never occur on the dictation path or under clipboard-only routing (ADR-010).
 - **FR-013**: Suggestion generation MUST support two backends: the existing local model, and a user-configured OpenAI-compatible endpoint (base URL + model name) whose API key is stored in the Keychain and never in the settings blob; backend selection defaults to local, and selecting external MUST display a privacy warning naming exactly what is transmitted.
 - **FR-014**: External-backend failures MUST fall back to the local engine when it is enabled and available; local failures MUST NOT escalate to the network. Generation MUST run under a hard deadline with an honest error state on expiry.
 - **FR-015**: When the focused field exposes a label and the dictation history contains relevant past outputs, the system MUST include up to three clipped history snippets in the prompt so candidates can reflect the user's own data; history remains opt-in and its absence MUST NOT block generation.

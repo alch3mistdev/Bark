@@ -77,6 +77,14 @@ On first launch macOS will ask for three permissions (each requested just-in-tim
   Pick *Copy to clipboard* for apps where synthetic paste/keystrokes are unreliable; paste with ⌘V.
 - **Re-use a past dictation** (needs history on) — the menu bar's **Re-insert recent** types a saved
   result into the app you're in; **Settings ▸ History** has a search box + per-row **Copy**.
+- **Suggested responses** (015, off by default) — press **F6** (configurable) and Bark reads the
+  frontmost window (accessibility tree, with an optional on-device OCR fallback), proposes 3–4 replies
+  in a small overlay, and inserts the one you pick — press `1–4`, arrows + Return, click, or `O` to
+  dictate your own. Great for answering a coding agent's "what next?" in a terminal, or filling a
+  labeled form field from your own dictation history. Engine: the on-device model, or (explicit opt-in,
+  with a privacy warning) any OpenAI-compatible endpoint such as a local Ollama. An optional
+  **auto-submit** toggle presses Return after your pick (off by default; see `docs/ADR-010`). What Bark
+  reads stays in memory and is never saved. Enable in **Settings ▸ Suggest**.
 
 ## On-device LLM rewrite (MLX) — built in by default
 

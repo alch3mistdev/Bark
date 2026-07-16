@@ -71,7 +71,7 @@ public struct Settings: Codable, Sendable, Equatable {
     public var suggestionBackend: SuggestionBackendID
     public var externalLLMEndpoint: String    // OpenAI-compatible base URL, e.g. http://localhost:11434/v1
     public var externalLLMModel: String       // chat-completions model name
-    public var suggestionAutoSubmit: Bool     // ADR-009 exception: opt-in Return after a picked suggestion
+    public var suggestionAutoSubmit: Bool     // ADR-010 exception: opt-in Return after a picked suggestion
 
     public init(
         selectedModeID: String = Mode.clean.id,

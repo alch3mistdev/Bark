@@ -126,6 +126,46 @@ code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the nex
   HUD shows "Refining…" to cue the user to wait, and decoupling segment capture from the LLM call is a
   planned follow-up. (ADV-003)
 
+## Suggested-responses surface  (`BarkCore/Suggest/*`, `BarkCore/Context/*`, `BarkEngines/Context/*`, `BarkEngines/Suggest/*`, `Sources/Bark/Suggestion*`, ADR-010, `specs/015-suggested-responses/`)
+- ☑ **Off by default** (`Settings.suggestionsEnabled == false`); nothing captures until the user opts in.
+- ☑ **Capture refuses secure fields before any read** (Secure Input + focused-role check in
+  `ContextCaptureService`), and the AX walk itself never collects `AXSecureTextField` values
+  (`AXContextReader`). (SEC-002 re-applied)
+- ☑ **Captured context is ephemeral**: memory only, never persisted, never logged (timings only), never
+  written to history. Accepted suggestions are recorded with an **empty transcript** and the suggestion
+  text only. (constitution v2.0.0 Principle I)
+- ☑ **Prompt-injection defense re-applied**: screen text, field metadata, and history snippets are
+  fenced (`<screen_context>`/`<focused_field>`/`<history_snippets>`) with all tag literals neutralized;
+  a fixed guardrail orders the model to treat them as data (`SuggestionPrompt`). Mirrors SEC-010.
+- ☑ **Output is hard-validated before it can be picked**: JSON/bullet parse, 1–4 items, single-line,
+  ≤160 chars, deduplicated (`SuggestionResponseParser`); zero valid candidates → an error state, never
+  injection. Chosen text then flows through the unchanged safe-injection path (sanitizer, preflight,
+  clipboard restore). (SEC-004/005/011 re-applied)
+- ☑ **External endpoint is an explicit opt-in** (constitution v2.0.0 / ADR-010): default backend is
+  local; selecting `external` shows a warning naming exactly what is transmitted; the API key lives in
+  the **Keychain** (`KeychainSecretStore`), never in the settings blob; failures fall back **toward**
+  the local engine, never the reverse.
+- ☑ **Auto-submit (Return) is the single sanctioned SEC-005 exception** (ADR-010): opt-in, default OFF,
+  decided by the exhaustively-tested `AutoSubmitPolicy`, confined to `ReturnKeySynthesizer` (the only
+  Return-posting site in the codebase), re-preflighted (focus + secure field) immediately before the
+  keypress, and never fired for dictated ("Other…") replies or clipboard-only routing.
+- ☑ **Screen Recording is optional and just-in-time**: gates only the OCR fallback; absent permission
+  the feature degrades to AX-only. OCR frames are processed on-device (Vision) and discarded.
+- **Residual (L-15 — external endpoint operator visibility):** when the user selects the external
+  backend, the endpoint operator sees whatever the prompt contains (clipped screen text, field label
+  and value, matched history snippets). Mitigations: default-local, explicit warning, Keychain key,
+  fail-toward-local. This is user-accepted by configuration, per constitution v2.0.0.
+- **Residual (L-16 — Return remapping):** a target app that rebinds Return receives a plain Return
+  keypress from auto-submit; the effect in that app is best-effort. The user read and chose the exact
+  inserted string (per-use consent).
+- **Residual (L-17 — key-panel focus semantics):** the overlay is a non-activating key panel; while it
+  is key, the system-wide AX focused element is the panel, so injection preflight runs only after the
+  panel is dismissed plus a settle delay. Runtime behavior across window managers is validated in the
+  015 QA matrix; the documented fallback is event-tap key consumption.
+- **Residual (L-18 — OCR misreads):** recognized text can differ from what is truly on screen;
+  suggestions built on it remain subject to the same output validation and are only ever inserted by an
+  explicit user pick.
+
 ## Permissions — least privilege  (`Resources/Bark.entitlements`, `PermissionsCoordinator`)
 - ☑ Only the microphone device entitlement. Accessibility + Input Monitoring are user-granted via TCC,
   requested just-in-time with purpose strings. (SEC-008 / T-011)

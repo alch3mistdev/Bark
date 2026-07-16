@@ -6,7 +6,7 @@
 
 ## Summary
 
-A third global flow beside push-to-talk and hands-free: a hotkey snapshots the frontmost app, captures on-screen context (AX tree first, on-device OCR fallback), asks a `SuggestionEngine` (local MLX sharing the cleaner's model residency, or a user-configured OpenAI-compatible endpoint) for 3–4 validated single-line candidates, and presents them in a key-accepting **non-activating** overlay panel. Selection injects through the untouched `InjectionRouter`/`TextInjector` pipeline; "Other…" hands off to a one-shot hands-free dictation; an opt-in auto-submit posts a single re-preflighted Return via the one new `ReturnKeySynthesizer` component (ADR-009). All new orchestration lives in a new `SuggestionController` — **zero edits to `DictationController` for the MVP story**. Captured context is ephemeral and prompt-fenced as untrusted input.
+A third global flow beside push-to-talk and hands-free: a hotkey snapshots the frontmost app, captures on-screen context (AX tree first, on-device OCR fallback), asks a `SuggestionEngine` (local MLX sharing the cleaner's model residency, or a user-configured OpenAI-compatible endpoint) for 3–4 validated single-line candidates, and presents them in a key-accepting **non-activating** overlay panel. Selection injects through the untouched `InjectionRouter`/`TextInjector` pipeline; "Other…" hands off to a one-shot hands-free dictation; an opt-in auto-submit posts a single re-preflighted Return via the one new `ReturnKeySynthesizer` component (ADR-010). All new orchestration lives in a new `SuggestionController` — **zero edits to `DictationController` for the MVP story**. Captured context is ephemeral and prompt-fenced as untrusted input.
 
 ## Technical Context
 
@@ -30,14 +30,14 @@ A third global flow beside push-to-talk and hands-free: a hotkey snapshots the f
 
 ## Constitution Check
 
-*GATE: gated against constitution v2.0.0 (amended this feature, ADR-009).*
+*GATE: gated against constitution v2.0.0 (amended this feature, ADR-010).*
 
 | Principle | Status | Evidence |
 |-----------|--------|----------|
 | I. Offline-First (v2.0.0) | PASS | Default backend local; external endpoint is the explicit per-feature opt-in carved out in v2.0.0: off by default, warning names transmitted data, key in Keychain, fail-toward-local, context never persisted/logged (FR-005, FR-013, FR-014). Dictation paths untouched and fully offline. |
 | II. Evidence or It Didn't Happen | PASS | Tests-first phases for every pure type; flow-test matrix for routing/auto-submit (SC-003/004); spike task produces a written result before overlay build-out; quickstart-style QA matrix in Polish phase. |
 | III. Swappable Engines Behind Protocols | PASS | New `SuggestionEngine` + `ContextCapturing` protocols in BarkCore; MLX and OpenAI-compatible backends are interchangeable conformances; overlay/controller depend only on protocols. `TextCleaner`, `STTEngine`, `TextInjector` unchanged. |
-| IV. Least Privilege & Safe Injection (v2.0.0) | PASS | Screen Recording requested just-in-time, degradable (FR-017). Secure-field refusal at capture and injection (FR-004, FR-010). Injectors keep their never-Return contract; the sole Return path is the opt-in, re-preflighted `ReturnKeySynthesizer` exception codified in v2.0.0 + ADR-009 (FR-012). Context fenced as untrusted (FR-008). |
+| IV. Least Privilege & Safe Injection (v2.0.0) | PASS | Screen Recording requested just-in-time, degradable (FR-017). Secure-field refusal at capture and injection (FR-004, FR-010). Injectors keep their never-Return contract; the sole Return path is the opt-in, re-preflighted `ReturnKeySynthesizer` exception codified in v2.0.0 + ADR-010 (FR-012). Context fenced as untrusted (FR-008). |
 | V. Speed-First, Non-Blocking | PASS | Suggestion flow is parallel to dictation and never touches its latency path; LLM warm reuses the existing lifecycle (FR-016); generation deadline-bounded with honest error states (FR-014); capture off-main. |
 
 **Post-design re-check**: PASS — no Complexity Tracking entries; the one contentious mechanism (key-accepting non-activating panel) is gated behind a spike with a documented fallback.
@@ -104,7 +104,7 @@ public var suggestionsHotkey: HotkeySetting  // keyToggle, keyCode 97 (F6); F5=9
 public var suggestionBackend: SuggestionBackendID = .local
 public var externalLLMEndpoint: String = ""                     // e.g. http://localhost:11434/v1
 public var externalLLMModel: String = ""
-public var suggestionAutoSubmit: Bool = false                   // ADR-009 exception, warning copy in UI
+public var suggestionAutoSubmit: Bool = false                   // ADR-010 exception, warning copy in UI
 ```
 
 API key: Keychain only (`KeychainSecretStore`, service `com.bark.external-llm`). Context char budget is a `ContextBudget` constant (4000), not a setting. The hotkey setter extends the existing pairwise collision guard to a 3-way check.
@@ -121,4 +121,4 @@ Numbered rationale lives in [research.md](research.md) (R1–R11). Load-bearing 
 
 ## Complexity Tracking
 
-None — no constitution violations to justify under v2.0.0; the amendment itself is governed by ADR-009 with user sign-off.
+None — no constitution violations to justify under v2.0.0; the amendment itself is governed by ADR-010 with user sign-off.

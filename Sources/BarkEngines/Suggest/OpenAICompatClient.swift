@@ -4,7 +4,7 @@ import BarkCore
 /// `SuggestionEngine` over an OpenAI-compatible chat-completions endpoint
 /// (015 FR-013): covers Ollama, LM Studio, and cloud providers behind one
 /// schema. Opt-in with a privacy warning (constitution v2.0.0 Principle I /
-/// ADR-009); the Bearer header is attached only when a key exists (Ollama is
+/// ADR-010); the Bearer header is attached only when a key exists (Ollama is
 /// keyless). Failures map to typed `SuggestionError`s so the controller can
 /// fall back toward the local engine (R8).
 public final class OpenAICompatClient: SuggestionEngine, Sendable {

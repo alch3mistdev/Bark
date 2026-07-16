@@ -359,7 +359,7 @@ final class InMemoryHistoryStore: HistoryStore, @unchecked Sendable {
     func purge() async throws { records = [] }
 }
 
-/// 015: records Return-synthesis calls (the ADR-009 auto-submit path).
+/// 015: records Return-synthesis calls (the ADR-010 auto-submit path).
 final class FakeReturnSynthesizer: ReturnKeySynthesizing, @unchecked Sendable {
     private(set) var count = 0
     private(set) var lastPlan: InjectionPlan?

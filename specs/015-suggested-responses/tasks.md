@@ -16,7 +16,7 @@
 ## Phase 1: Setup
 
 - [x] T001 Baseline evidence: `swift build` + `swift test` green on both `Package.swift` (MLX) and `Package-lean.swift` before any change; record output.
-- [x] T002 [P] Governance: verify constitution v2.0.0 amendment (`.specify/memory/constitution.md`, `docs/constitution.md`) and `docs/ADR-009-suggested-responses-privacy-exceptions.md` are merged on this branch (done during spec phase; confirm).
+- [x] T002 [P] Governance: verify constitution v2.0.0 amendment (`.specify/memory/constitution.md`, `docs/constitution.md`) and `docs/ADR-010-suggested-responses-privacy-exceptions.md` are merged on this branch (done during spec phase; confirm).
 
 ## Phase 2: Foundational (blocking — no story work before this completes)
 
@@ -86,10 +86,10 @@ Shared plumbing:
 
 ## Phase 6: Polish & Evidence
 
-- [ ] T041 Failure-mode QA matrix (manual, evidence recorded): no Accessibility permission, no Screen Recording, AX+OCR empty, LLM cold/warm, timeout, endpoint down, secure field, focus drift mid-flow, hotkey toggle-dismiss. Apps: Terminal, iTerm2, VS Code, Safari form.
-- [ ] T042 [P] Overlay accessibility (VoiceOver labels on rows/states, per 014 conventions) + visual polish.
-- [ ] T043 [P] Docs: SECURITY.md residuals (Return remap best-effort; external endpoint operator visibility), README feature blurb.
-- [ ] T044 Evidence: `swift build` + `swift test` output on both configs; SC-002 grep proof (no captured context on disk).
+- [ ] T041 Failure-mode QA matrix (manual, evidence recorded — PENDING USER RUN, scripted in quickstart.md): no Accessibility permission, no Screen Recording, AX+OCR empty, LLM cold/warm, timeout, endpoint down, secure field, focus drift mid-flow, hotkey toggle-dismiss. Apps: Terminal, iTerm2, VS Code, Safari form.
+- [x] T042 [P] Overlay accessibility (VoiceOver labels on rows/states, per 014 conventions) + visual polish.
+- [x] T043 [P] Docs: SECURITY.md residuals (Return remap best-effort; external endpoint operator visibility), README feature blurb.
+- [x] T044 Evidence: `swift build` + `swift test` output on both configs; SC-002 grep proof (no captured context on disk).
 - [ ] T045 Adversarial review (Codex + ef-adversary) on the diff; fix or document flagged items.
 
 ---

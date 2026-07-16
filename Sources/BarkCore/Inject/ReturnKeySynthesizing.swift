@@ -2,7 +2,7 @@ import Foundation
 
 /// Posts a single Return keypress after a selected suggestion was inserted —
 /// the ONE sanctioned exception to the never-synthesize-Return rule
-/// (constitution v2.0.0 Principle IV / ADR-009 / 015 FR-012). Gated by
+/// (constitution v2.0.0 Principle IV / ADR-010 / 015 FR-012). Gated by
 /// `AutoSubmitPolicy` at the call site; the concrete impl
 /// (`ReturnKeySynthesizer`, BarkEngines) re-runs injection preflight
 /// immediately before the keypress. `TextInjector` implementations remain

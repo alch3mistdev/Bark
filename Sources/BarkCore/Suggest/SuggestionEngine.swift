@@ -2,7 +2,7 @@ import Foundation
 
 /// Which engine generates suggestions (015 FR-013). `local` = the on-device
 /// MLX model (rides the existing `llmEnabled` consent); `external` = a
-/// user-configured OpenAI-compatible endpoint (opt-in, warned, ADR-009).
+/// user-configured OpenAI-compatible endpoint (opt-in, warned, ADR-010).
 public enum SuggestionBackendID: String, Codable, Sendable, CaseIterable, Identifiable {
     case local
     case external

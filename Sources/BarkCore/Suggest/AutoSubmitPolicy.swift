@@ -1,6 +1,6 @@
 import Foundation
 
-/// The single decision point for the SEC-005 exception (015 FR-012 / ADR-009):
+/// The single decision point for the SEC-005 exception (015 FR-012 / ADR-010):
 /// whether to post Return after inserting a suggestion. Pure and exhaustively
 /// tested — `ReturnKeySynthesizer` (the only Return-posting site) fires only
 /// when this approves. Terminals are deliberately allowed: the user read and

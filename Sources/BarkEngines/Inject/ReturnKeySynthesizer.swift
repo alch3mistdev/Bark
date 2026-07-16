@@ -3,7 +3,7 @@ import CoreGraphics
 import BarkCore
 
 /// The ONLY place in the codebase that synthesizes Return (keycode 36) — the
-/// ADR-009 exception to SEC-005/T-006, confined here so it stays auditable.
+/// ADR-010 exception to SEC-005/T-006, confined here so it stays auditable.
 /// Fires only after `AutoSubmitPolicy` approved and re-runs the full injection
 /// preflight (focus unchanged + secure-field refusal) immediately before the
 /// keypress, so a focus drift between insertion and submission aborts.
@@ -24,7 +24,7 @@ public final class ReturnKeySynthesizer: ReturnKeySynthesizing {
             }
             down.post(tap: .cgAnnotatedSessionEventTap)
             up.post(tap: .cgAnnotatedSessionEventTap)
-            BarkLog.inject.info("auto-submit: posted Return (ADR-009 path)")
+            BarkLog.inject.info("auto-submit: posted Return (ADR-010 path)")
         }
     }
 }

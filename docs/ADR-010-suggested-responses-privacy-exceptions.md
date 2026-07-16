@@ -1,4 +1,4 @@
-# ADR-009 — Suggested Responses: external LLM endpoint & opt-in auto-submit (constitution v2.0.0 exceptions)
+# ADR-010 — Suggested Responses: external LLM endpoint & opt-in auto-submit (constitution v2.0.0 exceptions)
 
 **Status:** Accepted (user sign-off in the 015 clarification session, 2026-07-16)
 **Date:** 2026-07-16

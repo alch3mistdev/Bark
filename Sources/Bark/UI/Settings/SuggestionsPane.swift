@@ -3,7 +3,7 @@ import BarkCore
 import BarkEngines
 
 /// Settings › Suggest (015): master switch, hotkey, engine backend (with the
-/// ADR-009 privacy warning for the external endpoint), and the opt-in
+/// ADR-010 privacy warning for the external endpoint), and the opt-in
 /// auto-submit exception with its warning copy.
 struct SuggestionsPane: View {
     @Bindable var controller: DictationController
@@ -52,7 +52,7 @@ struct SuggestionsPane: View {
                         .onChange(of: apiKey) { _, newValue in
                             suggestions.externalAPIKey = newValue
                         }
-                    // ADR-009 / Principle I: name exactly what is transmitted.
+                    // ADR-010 / Principle I: name exactly what is transmitted.
                     Label("Privacy: when this backend is selected, the captured screen text, the focused "
                           + "field's label and value, and any matched history snippets are SENT to this "
                           + "endpoint for each suggestion request. The key is stored in your Keychain. "
@@ -65,7 +65,7 @@ struct SuggestionsPane: View {
             Section("After inserting") {
                 Toggle("Auto-submit (press Return for me)", isOn: $suggestions.autoSubmit)
                     .disabled(!suggestions.enabled)
-                // ADR-009 / Principle IV exception: spell out the behavior.
+                // ADR-010 / Principle IV exception: spell out the behavior.
                 Text("When on, Bark presses Return once after inserting a suggestion you explicitly "
                      + "picked — including in terminals, where that runs the reply. It never fires for "
                      + "dictated (“Other…”) replies, clipboard-only routing, or secure fields, and it "

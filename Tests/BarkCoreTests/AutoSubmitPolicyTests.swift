@@ -1,7 +1,7 @@
 import XCTest
 @testable import BarkCore
 
-/// Exhaustive decision table for the SEC-005 exception (015 FR-012 / ADR-009):
+/// Exhaustive decision table for the SEC-005 exception (015 FR-012 / ADR-010):
 /// Return fires ONLY when every guard passes — enabled, an explicitly selected
 /// suggestion, a typing strategy (not copyOnly), no secure input, focus intact.
 final class AutoSubmitPolicyTests: XCTestCase {
@@ -49,7 +49,7 @@ final class AutoSubmitPolicyTests: XCTestCase {
     }
 
     func testTerminalsAreDeliberatelyAllowed() {
-        // keystroke strategy == terminal target: allowed by design (ADR-009) —
+        // keystroke strategy == terminal target: allowed by design (ADR-010) —
         // the user read and chose the exact string (per-use consent).
         XCTAssertTrue(AutoSubmitPolicy.decide(
             enabled: true, selectionWasExplicit: true, strategy: .keystroke,
