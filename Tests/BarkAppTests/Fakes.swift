@@ -305,6 +305,79 @@ final class InMemorySpeakerProfileStore: SpeakerProfileStore, @unchecked Sendabl
     func delete() async { profile = nil }
 }
 
+/// 015: scripted on-screen context capture — canned result or a capture error.
+final class FakeContextCapture: ContextCapturing, @unchecked Sendable {
+    enum Behavior { case ok(CapturedContext), fail(ContextCaptureError) }
+    private let behavior: Behavior
+    private(set) var captureCount = 0
+    private(set) var lastTarget: InjectionTarget?
+
+    init(_ behavior: Behavior) { self.behavior = behavior }
+
+    func capture(target: InjectionTarget) async throws -> CapturedContext {
+        captureCount += 1
+        lastTarget = target
+        switch behavior {
+        case .ok(let context): return context
+        case .fail(let error): throw error
+        }
+    }
+}
+
+/// 015: suggestion engine returning canned raw model text, failing, or hanging
+/// (to exercise the generation deadline). Records the requests it receives.
+final class FakeSuggestionEngine: SuggestionEngine, @unchecked Sendable {
+    enum Behavior { case ok(String), fail(SuggestionError), hang }
+    private let behavior: Behavior
+    let available: Bool
+    private(set) var requests: [SuggestionRequest] = []
+
+    init(_ behavior: Behavior, available: Bool = true) {
+        self.behavior = behavior
+        self.available = available
+    }
+
+    var isAvailable: Bool { get async { available } }
+
+    func suggest(_ request: SuggestionRequest) async throws -> String {
+        requests.append(request)
+        switch behavior {
+        case .ok(let raw): return raw
+        case .fail(let error): throw error
+        case .hang: try await Task.sleep(for: .seconds(60)); return "[]"
+        }
+    }
+}
+
+/// 015: in-memory history store — seeds records for history-informed
+/// suggestion tests without crypto/Keychain/disk.
+final class InMemoryHistoryStore: HistoryStore, @unchecked Sendable {
+    private var records: [HistoryRecord]
+    init(_ records: [HistoryRecord] = []) { self.records = records }
+    func append(_ record: HistoryRecord) async throws { records.append(record) }
+    func all() async -> [HistoryRecord] { records }
+    func purge() async throws { records = [] }
+}
+
+/// 015: records Return-synthesis calls (the ADR-010 auto-submit path).
+final class FakeReturnSynthesizer: ReturnKeySynthesizing, @unchecked Sendable {
+    private(set) var count = 0
+    private(set) var lastPlan: InjectionPlan?
+    func postReturn(plan: InjectionPlan) async throws {
+        count += 1
+        lastPlan = plan
+    }
+}
+
+/// 015: in-memory secret store — client/settings tests never touch the Keychain.
+final class InMemorySecretStore: SecretStore, @unchecked Sendable {
+    private var storage: [String: String] = [:]
+    init(_ initial: [String: String] = [:]) { storage = initial }
+    func read(account: String) -> String? { storage[account] }
+    func write(_ secret: String, account: String) throws { storage[account] = secret }
+    func delete(account: String) { storage[account] = nil }
+}
+
 /// Injector that records text, or fails a configurable number of times.
 final class FakeInjector: TextInjector, @unchecked Sendable {
     enum FailMode { case none, secure, focusChanged }

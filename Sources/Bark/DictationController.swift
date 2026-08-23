@@ -135,6 +135,12 @@ public final class DictationController {
 
     public var llmAvailable: Bool { llmCleaner != nil }
 
+    /// 015: the suggestion flow rides the same LLM residency (the MLX cleaner
+    /// conforms to `SuggestionEngine`) and the same history store — exposed for
+    /// `CompositionRoot` wiring only.
+    var sharedSuggestionEngine: SuggestionEngine? { llmCleaner as? SuggestionEngine }
+    var sharedHistoryStore: HistoryStore? { history }
+
     // MARK: - Settings-derived state (UI binds here; writes persist)
 
     public var modes: [Mode] { settings.settings.effectiveModes() }
@@ -168,6 +174,10 @@ public final class DictationController {
         set {
             guard newValue != settings.settings.handsFreeHotkey else {   // no shared binding (ADV-002)
                 lastError = "That key is already the hands-free hotkey."
+                return
+            }
+            guard newValue != settings.settings.suggestionsHotkey else {   // 3-way guard (015)
+                lastError = "That key is already the suggestions hotkey."
                 return
             }
             // Rebinding mid-session would strand a live session on the old key (Codex).
@@ -501,6 +511,7 @@ public final class DictationController {
         case .microphone:      Task { await permissions.requestMicrophone() }
         case .accessibility:   permissions.requestAccessibility()
         case .inputMonitoring: permissions.requestInputMonitoring()
+        case .screenRecording: permissions.requestScreenRecording()
         }
     }
 
@@ -1033,6 +1044,10 @@ public final class DictationController {
         set {
             guard newValue != settings.settings.hotkey else {   // no shared binding (ADV-002)
                 lastError = "That key is already the push-to-talk hotkey."
+                return
+            }
+            guard newValue != settings.settings.suggestionsHotkey else {   // 3-way guard (015)
+                lastError = "That key is already the suggestions hotkey."
                 return
             }
             settings.update { $0.handsFreeHotkey = newValue }

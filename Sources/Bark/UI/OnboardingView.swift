@@ -23,7 +23,7 @@ struct OnboardingView: View {
 
             Text("Bark uses three permissions — only the microphone is required:").font(.headline)
             VStack(spacing: 10) {
-                ForEach(PermissionKind.allCases, id: \.self) { kind in
+                ForEach(PermissionKind.onboardingKinds, id: \.self) { kind in
                     PermissionRow(controller: controller, kind: kind)
                 }
             }

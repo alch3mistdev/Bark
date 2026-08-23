@@ -5,8 +5,16 @@ import BarkCore
 public enum HotkeyTrigger: Sendable, Equatable {
     /// Push-to-talk: hold a modifier (default: the fn / Globe key).
     case modifierHold(CGEventFlags)
-    /// Tap a key to toggle dictation on/off.
-    case keyToggle(CGKeyCode)
+    /// Tap a key to toggle dictation on/off. `modifiers` are the ⌃⌥⌘⇧ keys that
+    /// must be held with it — empty means a bare key (e.g. a function key). A
+    /// chord (e.g. ⌃⌥S) lets a hotkey avoid the function-key row entirely, so it
+    /// never needs `fn` (which would collide with a fn-hold push-to-talk).
+    case keyToggle(CGKeyCode, CGEventFlags)
+
+    /// The ⌃⌥⌘⇧ subset — the only modifier bits a chord matches on. `fn`, caps,
+    /// and the numeric-pad bit are ignored so a function key still fires whether
+    /// or not the keyboard sent it via `fn`.
+    public static let chordMask: CGEventFlags = [.maskControl, .maskAlternate, .maskCommand, .maskShift]
 }
 
 public struct HotkeyConfig: Sendable, Equatable {
@@ -140,10 +148,15 @@ public final class HotkeyManager: @unchecked Sendable {
             }
             return false  // never consume modifier events (system-wide)
 
-        case .keyToggle(let key):
+        case .keyToggle(let key, let required):
             guard type == .keyDown || type == .keyUp else { return false }
             let code = CGKeyCode(event.getIntegerValueField(.keyboardEventKeycode))
             guard code == key else { return false }
+            // The held ⌃⌥⌘⇧ set must EXACTLY equal the binding's — so ⌃⌥S fires
+            // only on ⌃⌥S, not ⌃⌥⌘S, and a bare key won't fire while a modifier
+            // is held.
+            let held = event.flags.intersection(HotkeyTrigger.chordMask)
+            guard held == required.intersection(HotkeyTrigger.chordMask) else { return false }
             if type == .keyUp { return true }  // swallow the matching key-up too
             guard event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else { return true }
             toggled.toggle()
@@ -161,7 +174,8 @@ public extension HotkeyConfig {
         case .modifierHold:
             self.init(trigger: .modifierHold(CGEventFlags(rawValue: setting.modifierFlags)))
         case .keyToggle:
-            self.init(trigger: .keyToggle(CGKeyCode(setting.keyCode)))
+            self.init(trigger: .keyToggle(CGKeyCode(setting.keyCode),
+                                          CGEventFlags(rawValue: setting.modifierFlags)))
         }
     }
 }
@@ -171,8 +185,9 @@ public extension HotkeySetting {
         switch config.trigger {
         case .modifierHold(let flags):
             self.init(kind: .modifierHold, keyCode: 0, modifierFlags: flags.rawValue)
-        case .keyToggle(let key):
-            self.init(kind: .keyToggle, keyCode: UInt16(key), modifierFlags: 0)
+        case .keyToggle(let key, let modifiers):
+            self.init(kind: .keyToggle, keyCode: UInt16(key),
+                      modifierFlags: modifiers.intersection(HotkeyTrigger.chordMask).rawValue)
         }
     }
 }

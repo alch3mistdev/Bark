@@ -9,6 +9,13 @@ public enum PermissionKind: String, Sendable, CaseIterable {
     case microphone
     case accessibility    // synthesize key events / read focused element
     case inputMonitoring  // global CGEventTap hotkey
+    case screenRecording  // 015: OCR fallback for suggestion context capture (optional, degradable)
+
+    /// The permissions surfaced at onboarding. Screen Recording is excluded —
+    /// it gates only the optional OCR fallback and is requested just-in-time,
+    /// never at first launch (015 R10), so it must not appear in the onboarding
+    /// "three permissions" list.
+    public static let onboardingKinds: [PermissionKind] = [.microphone, .accessibility, .inputMonitoring]
 }
 
 public enum PermissionState: Sendable, Equatable {
@@ -26,11 +33,14 @@ public final class PermissionsCoordinator {
     public private(set) var microphone: PermissionState = .notDetermined
     public private(set) var accessibility: PermissionState = .notDetermined
     public private(set) var inputMonitoring: PermissionState = .notDetermined
+    public private(set) var screenRecording: PermissionState = .notDetermined
 
     public init() {
         refresh()
     }
 
+    /// The three core permissions. Screen Recording is deliberately excluded:
+    /// it only gates the OCR fallback and the feature degrades without it (015).
     public var allGranted: Bool {
         microphone == .granted && accessibility == .granted && inputMonitoring == .granted
     }
@@ -39,16 +49,19 @@ public final class PermissionsCoordinator {
         microphone = Self.micState()
         accessibility = AXIsProcessTrusted() ? .granted : .denied
         inputMonitoring = CGPreflightListenEventAccess() ? .granted : .denied
+        screenRecording = CGPreflightScreenCaptureAccess() ? .granted : .denied
     }
 
     #if DEBUG
     /// Test seam: force permission states without touching real TCC.
     public func overrideForTesting(microphone: PermissionState? = nil,
                                    accessibility: PermissionState? = nil,
-                                   inputMonitoring: PermissionState? = nil) {
+                                   inputMonitoring: PermissionState? = nil,
+                                   screenRecording: PermissionState? = nil) {
         if let microphone { self.microphone = microphone }
         if let accessibility { self.accessibility = accessibility }
         if let inputMonitoring { self.inputMonitoring = inputMonitoring }
+        if let screenRecording { self.screenRecording = screenRecording }
     }
     #endif
 
@@ -57,6 +70,7 @@ public final class PermissionsCoordinator {
         case .microphone: return microphone
         case .accessibility: return accessibility
         case .inputMonitoring: return inputMonitoring
+        case .screenRecording: return screenRecording
         }
     }
 
@@ -92,14 +106,26 @@ public final class PermissionsCoordinator {
         }
     }
 
+    /// Triggers the Screen Recording prompt (015: gates only the OCR fallback;
+    /// requested just-in-time when AX context is too thin, never at launch).
+    public func requestScreenRecording() {
+        if CGPreflightScreenCaptureAccess() {
+            screenRecording = .granted
+        } else {
+            _ = CGRequestScreenCaptureAccess()
+            screenRecording = CGPreflightScreenCaptureAccess() ? .granted : .denied
+        }
+    }
+
     // MARK: System Settings deep links
 
     public func openSettings(for kind: PermissionKind) {
         let anchor: String
         switch kind {
-        case .microphone:     anchor = "Privacy_Microphone"
-        case .accessibility:  anchor = "Privacy_Accessibility"
+        case .microphone:      anchor = "Privacy_Microphone"
+        case .accessibility:   anchor = "Privacy_Accessibility"
         case .inputMonitoring: anchor = "Privacy_ListenEvent"
+        case .screenRecording: anchor = "Privacy_ScreenCapture"
         }
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)") {
             NSWorkspace.shared.open(url)
