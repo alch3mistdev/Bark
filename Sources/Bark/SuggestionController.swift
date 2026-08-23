@@ -265,7 +265,7 @@ public final class SuggestionController {
                 // backend the local model is never warmed at start(), so
                 // `run` would otherwise poll a cold engine until the deadline.
                 if localEngineUsable, let local = localEngine {
-                    BarkLog.cleanup.error("external suggestion engine failed; falling back to local")
+                    BarkLog.cleanup.error("external suggestion engine failed (\(String(describing: error), privacy: .public)); falling back to local")
                     dictation.prepareLLM()
                     return try await run(local, request)
                 }

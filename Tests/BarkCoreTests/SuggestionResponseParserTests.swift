@@ -87,4 +87,31 @@ final class SuggestionResponseParserTests: XCTestCase {
         let raw = #"["  padded  ", "ok"]"#
         XCTAssertEqual(SuggestionResponseParser.parse(raw), ["padded", "ok"])
     }
+
+    func testStripsThinkBlockBeforeArray() {
+        let raw = """
+        <think>The user wants options like [run tests] or something. Let me list them.</think>
+        ["Run the tests", "Ship it"]
+        """
+        XCTAssertEqual(SuggestionResponseParser.parse(raw), ["Run the tests", "Ship it"])
+    }
+
+    func testUnterminatedThinkBlockDropsToEnd() {
+        // If the array itself is inside an unterminated think span, there's
+        // nothing to salvage — better empty than reasoning text as candidates.
+        let raw = "<think>still reasoning about [a, b, c] and more"
+        XCTAssertEqual(SuggestionResponseParser.parse(raw), [])
+    }
+
+    func testStrayBracketsAroundArrayDontBreakDecoding() {
+        // Prose with an unrelated "[note]" before the real array — first-[…last-]
+        // would span both and fail; balanced scan finds the real one.
+        let raw = #"[note] here are ideas: ["Run the tests", "Open a PR"] hope it helps"#
+        XCTAssertEqual(SuggestionResponseParser.parse(raw), ["Run the tests", "Open a PR"])
+    }
+
+    func testArrayWithBracketInsideAStringItem() {
+        let raw = #"["Run tests [all]", "Ship it"]"#
+        XCTAssertEqual(SuggestionResponseParser.parse(raw), ["Run tests [all]", "Ship it"])
+    }
 }
