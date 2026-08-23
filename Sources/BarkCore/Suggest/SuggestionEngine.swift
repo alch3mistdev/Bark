@@ -39,12 +39,34 @@ public protocol SuggestionEngine: Sendable {
     var isAvailable: Bool { get async }
     func prepare(progress: @escaping @Sendable (Double) -> Void) async throws
     func suggest(_ request: SuggestionRequest) async throws -> String
+    /// Incremental raw output (016). Each chunk is a well-formed String, but
+    /// chunk boundaries carry NO alignment guarantee — they may split JSON
+    /// tokens, think tags, or candidate text anywhere; consumers parse via
+    /// `SuggestionStreamParser`. Concatenated chunks must equal what
+    /// `suggest(_:)` would return. The default wraps `suggest` in a single
+    /// terminal chunk — that IS the graceful degrade for engines that can't
+    /// stream (FR-010), so conformers need not opt in.
+    func suggestStream(_ request: SuggestionRequest) -> AsyncThrowingStream<String, Error>
     func unload() async
 }
 
 public extension SuggestionEngine {
     func prepare(progress: @escaping @Sendable (Double) -> Void) async throws {}
     func unload() async {}
+
+    func suggestStream(_ request: SuggestionRequest) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    continuation.yield(try await self.suggest(request))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
 }
 
 public enum SuggestionError: Error, Sendable, Equatable {
