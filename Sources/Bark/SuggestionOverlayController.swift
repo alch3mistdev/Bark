@@ -30,10 +30,9 @@ final class SuggestionOverlayController: NSObject, NSWindowDelegate {
             // app must stay focused. A key panel would make Bark's own panel the
             // focused element and defeat the secure-field guard (R3).
             show(session, takeKey: false)
-        case .generating:
-            update(session, takeKey: false)
-        case .presenting, .failed:
-            // Capture is done; now take key so 1–4/arrows/Return/Esc work.
+        case .generating, .presenting, .failed:
+            // Capture is done; take key so Other…/Esc work before the first
+            // candidate (016 FR-012) and 1–4/arrows/Return once rows exist.
             update(session, takeKey: true)
         case .idle, .injecting, .dictating:
             hide()
