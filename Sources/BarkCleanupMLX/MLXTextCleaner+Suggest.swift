@@ -40,9 +40,6 @@ extension MLXTextCleaner: SuggestionEngine {
                 break
             }
         }
-        // TEMP DIAGNOSTIC (015): raw model output, to tune the parser against
-        // this model's actual formatting. Remove once suggestions are reliable.
-        BarkLog.cleanup.info("llm suggest RAW <<<\(output, privacy: .public)>>>")
         return output
     }
 }
