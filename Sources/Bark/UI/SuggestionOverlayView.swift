@@ -12,11 +12,16 @@ struct SuggestionOverlayView: View {
     static let rowHeight: CGFloat = 34
     static let chromeHeight: CGFloat = 20
 
+    static let footerHeight: CGFloat = 22
+
     static func size(for session: SuggestionSession) -> CGSize {
         switch session.phase {
-        case .presenting:
+        case .presenting, .generating:
+            // 016: rows fill progressively — .generating shows the Other… row
+            // alone; a footer advertises that more candidates are coming.
             let rows = CGFloat(session.candidates.count + 1)   // + Other…
-            return CGSize(width: width, height: rows * rowHeight + chromeHeight)
+            let footer = session.isStreaming ? footerHeight : 0
+            return CGSize(width: width, height: rows * rowHeight + chromeHeight + footer)
         case .failed:
             return CGSize(width: width, height: 72)
         default:
@@ -29,9 +34,7 @@ struct SuggestionOverlayView: View {
             switch controller.session.phase {
             case .capturing:
                 statusRow("eye", "Reading screen…")
-            case .generating:
-                statusRow("sparkles", "Thinking…")
-            case .presenting:
+            case .generating, .presenting:
                 candidateList
             case .failed(let message):
                 errorRow(message)
@@ -59,8 +62,25 @@ struct SuggestionOverlayView: View {
                 accessibilityHint: "Press O to dictate a custom reply") {
                 controller.chooseOther()
             }
+            if controller.session.isStreaming {
+                generatingFooter
+            }
         }
         .padding(8)
+    }
+
+    /// 016 FR-004: subtle "still generating" affordance under the rows.
+    private var generatingFooter: some View {
+        HStack(spacing: 6) {
+            ProgressView().controlSize(.mini)
+            Text(controller.session.candidates.isEmpty ? "Thinking…" : "More coming…")
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: Self.footerHeight - 4)
+        .accessibilityLabel("Still generating suggestions")
     }
 
     private func row(badge: String, text: String, highlighted: Bool,

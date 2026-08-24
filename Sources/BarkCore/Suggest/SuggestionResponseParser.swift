@@ -23,7 +23,9 @@ public enum SuggestionResponseParser {
 
     /// Remove `<think>…</think>` / `<reasoning>…</reasoning>` spans (balanced or
     /// an unterminated leading one) that reasoning models emit before the answer.
-    private static func stripThinkBlocks(_ raw: String) -> String {
+    /// Internal: `SuggestionStreamParser` (016) applies the same scrub so held-back
+    /// reasoning text can never leak a candidate.
+    static func stripThinkBlocks(_ raw: String) -> String {
         var s = raw
         for (open, close) in [("<think>", "</think>"), ("<reasoning>", "</reasoning>")] {
             while let o = s.range(of: open) {
@@ -73,8 +75,9 @@ public enum SuggestionResponseParser {
     }
 
     /// Salvage ONLY marker-prefixed lines (`-`, `*`, `•`, `–`, `1.`, `1)`) so
-    /// surrounding prose is never mistaken for a candidate.
-    private static func salvageMarkedLines(_ raw: String) -> [String] {
+    /// surrounding prose is never mistaken for a candidate. Internal for the
+    /// stream parser (016) — one salvage rulebook.
+    static func salvageMarkedLines(_ raw: String) -> [String] {
         raw.components(separatedBy: .newlines).compactMap { line in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard let body = stripMarker(trimmed) else { return nil }
@@ -104,8 +107,10 @@ public enum SuggestionResponseParser {
     }
 
     /// Shared validation: trim, single-line, 1...160 chars (reject, never
-    /// truncate), case-insensitive dedupe, cap.
-    private static func validate(_ items: [String], cap: Int) -> [String] {
+    /// truncate), case-insensitive dedupe, cap. Internal: the ONE rulebook —
+    /// `SuggestionStreamParser` (016) validates through this same function so
+    /// streaming can never show a candidate the batch parser would reject.
+    static func validate(_ items: [String], cap: Int) -> [String] {
         var seen = Set<String>()
         var result: [String] = []
         for item in items {

@@ -42,6 +42,7 @@ public final class SuggestionController {
 
     private var capturedTarget: InjectionTarget?
     private var flowTask: Task<Void, Never>?
+    private var generationTask: Task<Void, Never>?   // 016: cancellable separately — selection kills generation, not injection
     private var oneShotDictation = false
     private var oneShotSawSpeech = false   // an utterance actually started in the one-shot session
     private var passToken = 0              // invalidates a stale capture/generation pass (dismiss or a new press)
@@ -178,6 +179,7 @@ public final class SuggestionController {
     public func deactivate() {
         hotkey.stop()
         flowTask?.cancel()
+        cancelGeneration()
     }
 
     // MARK: - Flow
@@ -220,15 +222,10 @@ public final class SuggestionController {
 
             let snippets = await historySnippets(for: context)
             let request = SuggestionPrompt.build(context: context, historySnippets: snippets)
-            let raw = try await generate(request)
-
             guard token == passToken, session.phase == .generating else { return }  // stale or dismissed
-            let candidates = SuggestionResponseParser.parse(raw)
-            guard !candidates.isEmpty else {
-                fail("Couldn't produce suggestions for this screen."); return
-            }
-            session.handle(.candidatesReady(candidates))
-            publish()
+            let generation = Task { await self.streamCandidates(request, token: token) }
+            generationTask = generation
+            await generation.value
         } catch let error as ContextCaptureError {
             guard token == passToken, session.isActive else { return }
             fail(Self.captureMessage(error))
@@ -240,48 +237,116 @@ public final class SuggestionController {
         }
     }
 
-    /// Pick the engine per backend setting, run under the hard deadline. The
-    /// availability wait covers a warm-up still in flight (edge: hotkey during
-    /// model load). External failures fall back to local — never the reverse
-    /// (R8: fail toward privacy).
-    private func generate(_ request: SuggestionRequest) async throws -> String {
+    /// 016: consume the engine's chunk stream under the hard deadline, showing
+    /// each validated candidate the moment it completes. Once anything is on
+    /// screen, later failures (deadline included) end the pass gracefully —
+    /// a partial set is a successful set (FR-011).
+    private func streamCandidates(_ request: SuggestionRequest, token: Int) async {
+        do {
+            // Structured race, NOT withThrowingDeadline: its body runs in an
+            // unstructured Task, so cancelling generationTask (selection,
+            // Escape) would never reach the stream — group children inherit
+            // cancellation, which is exactly the point of the split task.
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                group.addTask { try await self.runStream(request, token: token) }
+                group.addTask { [generationDeadline] in
+                    try await Task.sleep(for: .seconds(generationDeadline))
+                    throw CleanupError.timedOut
+                }
+                try await group.next()   // stream done, timeout, or cancellation
+                group.cancelAll()        // stop the loser (timer or stream)
+            }
+            finishGeneration(token: token)
+        } catch is CancellationError {
+            // dismissed or selection cancelled generation — session moved on
+        } catch {
+            guard token == passToken, session.isActive else { return }
+            if session.phase == .presenting {
+                finishGeneration(token: token)   // keep what's shown (FR-011)
+            } else {
+                fail(Self.generationMessage(error))
+            }
+        }
+    }
+
+    /// Stream end with candidates shown → footer clears; with none → the
+    /// honest error state (the machine refuses `.generationFinished` at zero).
+    private func finishGeneration(token: Int) {
+        guard token == passToken else { return }
+        switch session.phase {
+        case .presenting:
+            if session.handle(.generationFinished) { publish() }
+        case .generating:
+            fail("Couldn't produce suggestions for this screen.")
+        default:
+            break   // selection/dismissal already moved the session on
+        }
+    }
+
+    /// Pick the engine per backend setting. External failures fall back to
+    /// local — never the reverse (R8: fail toward privacy) — but only while
+    /// nothing has been shown yet: shown rows are immutable, and mixing
+    /// engines' candidate sets would violate that.
+    private func runStream(_ request: SuggestionRequest, token: Int) async throws {
         switch settings.settings.suggestionBackend {
         case .local:
             guard localEngineUsable, let engine = localEngine else {
                 throw SuggestionError.engineUnavailable
             }
-            return try await run(engine, request)
+            try await consumeStream(engine, request, token: token)
         case .external:
             guard let engine = makeExternalEngine() else {
                 throw SuggestionError.endpointNotConfigured
             }
             do {
-                return try await run(engine, request)
+                try await consumeStream(engine, request, token: token)
             } catch let error as CancellationError {
                 throw error   // dismissed — don't spin up a fallback
             } catch {
                 // R8: retry on-device when possible; local errors never escalate
                 // to the network. Kick the model load first — with an external
-                // backend the local model is never warmed at start(), so
-                // `run` would otherwise poll a cold engine until the deadline.
-                if localEngineUsable, let local = localEngine {
-                    BarkLog.cleanup.error("external suggestion engine failed (\(String(describing: error), privacy: .public)); falling back to local")
-                    dictation.prepareLLM()
-                    return try await run(local, request)
+                // backend the local model is never warmed at start(), so the
+                // availability wait would otherwise poll a cold engine until
+                // the deadline.
+                guard session.candidates.isEmpty, localEngineUsable, let local = localEngine else {
+                    throw error
                 }
-                throw error
+                BarkLog.cleanup.error("external suggestion engine failed (\(String(describing: error), privacy: .public)); falling back to local")
+                dictation.prepareLLM()
+                try await consumeStream(local, request, token: token)
             }
         }
     }
 
-    private func run(_ engine: SuggestionEngine, _ request: SuggestionRequest) async throws -> String {
-        try await withThrowingDeadline(seconds: generationDeadline) {
-            while !(await engine.isAvailable) {
-                try Task.checkCancellation()
-                try await Task.sleep(for: .milliseconds(200))
-            }
-            return try await engine.suggest(request)
+    /// The availability wait covers a warm-up still in flight (edge: hotkey
+    /// during model load). Ending the loop early (candidate cap) tears the
+    /// stream down, which cancels the engine's producer.
+    private func consumeStream(_ engine: SuggestionEngine, _ request: SuggestionRequest, token: Int) async throws {
+        while !(await engine.isAvailable) {
+            try Task.checkCancellation()
+            try await Task.sleep(for: .milliseconds(200))
         }
+        var parser = SuggestionStreamParser()
+        for try await chunk in engine.suggestStream(request) {
+            try Task.checkCancellation()
+            guard token == passToken else { return }
+            deliver(parser.consume(chunk), token: token)
+            if session.candidates.count >= SuggestionResponseParser.maxCandidates { return }
+        }
+        guard token == passToken else { return }
+        deliver(parser.finish(), token: token)
+    }
+
+    private func deliver(_ fresh: [String], token: Int) {
+        for candidate in fresh {
+            guard token == passToken else { return }
+            if session.handle(.candidateArrived(candidate)) { publish() }
+        }
+    }
+
+    private func cancelGeneration() {
+        generationTask?.cancel()
+        generationTask = nil
     }
 
     private func makeExternalEngine() -> SuggestionEngine? {
@@ -306,6 +371,7 @@ public final class SuggestionController {
 
     public func choose(_ index: Int) {
         guard session.handle(.choose(index)) else { return }
+        cancelGeneration()   // 016: selection ends the stream BEFORE injection runs
         publish()   // overlay hides on .injecting; focus returns to the target
         flowTask = Task { await injectChosen() }
     }
@@ -316,25 +382,38 @@ public final class SuggestionController {
     }
 
     public func acceptHighlighted() {
-        guard session.phase == .presenting else { return }
-        let wasOther = session.highlightedIndex == session.otherRowIndex
-        guard session.handle(.acceptHighlighted) else { return }
-        publish()
-        if wasOther {
+        switch session.phase {
+        case .presenting:
+            let wasOther = session.highlightedIndex == session.otherRowIndex
+            guard session.handle(.acceptHighlighted) else { return }
+            cancelGeneration()
+            publish()
+            if wasOther {
+                startOtherDictation()
+            } else {
+                flowTask = Task { await injectChosen() }
+            }
+        case .generating:
+            // Only row on screen is Other… (016 FR-012) — Return accepts it.
+            guard session.handle(.acceptHighlighted) else { return }
+            cancelGeneration()
+            publish()
             startOtherDictation()
-        } else {
-            flowTask = Task { await injectChosen() }
+        default:
+            return
         }
     }
 
     public func chooseOther() {
         guard session.handle(.chooseOther) else { return }
+        cancelGeneration()   // 016: abandon in-flight candidates
         publish()
         startOtherDictation()
     }
 
     public func dismiss() {
         flowTask?.cancel(); flowTask = nil
+        cancelGeneration()
         passToken += 1   // invalidate any in-flight capture/generation pass
         if oneShotDictation {
             oneShotDictation = false
