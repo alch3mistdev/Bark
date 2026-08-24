@@ -243,8 +243,18 @@ public final class SuggestionController {
     /// a partial set is a successful set (FR-011).
     private func streamCandidates(_ request: SuggestionRequest, token: Int) async {
         do {
-            try await withThrowingDeadline(seconds: generationDeadline) {
-                try await self.runStream(request, token: token)
+            // Structured race, NOT withThrowingDeadline: its body runs in an
+            // unstructured Task, so cancelling generationTask (selection,
+            // Escape) would never reach the stream — group children inherit
+            // cancellation, which is exactly the point of the split task.
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                group.addTask { try await self.runStream(request, token: token) }
+                group.addTask { [generationDeadline] in
+                    try await Task.sleep(for: .seconds(generationDeadline))
+                    throw CleanupError.timedOut
+                }
+                try await group.next()   // stream done, timeout, or cancellation
+                group.cancelAll()        // stop the loser (timer or stream)
             }
             finishGeneration(token: token)
         } catch is CancellationError {
