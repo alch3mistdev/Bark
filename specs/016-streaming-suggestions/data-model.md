@@ -17,7 +17,7 @@ All state is in-memory and ephemeral; nothing here is persisted.
 | Event | Replaces | Legal in | Effect |
 |---|---|---|---|
 | `.candidateArrived(String)` | `.candidatesReady([String])` | `.generating`, `.presenting` | append (already-validated) candidate; `.generating` → `.presenting` on first |
-| `.generationFinished` | — (new) | `.generating`, `.presenting` | clears `isStreaming`; in `.generating` the caller routes zero-candidate to `.errored` instead |
+| `.generationFinished` | — (new) | `.presenting` only | clears `isStreaming`; the machine refuses it in `.generating` (zero candidates), which is the caller's cue to route to `.errored` |
 | all others | unchanged | unchanged (+ `.chooseOther` now legal in `.generating`) | `.chooseOther` from `.generating` = early escape hatch (FR-012) |
 
 ### State transitions

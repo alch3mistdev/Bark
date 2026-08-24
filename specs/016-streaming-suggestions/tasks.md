@@ -9,14 +9,14 @@
 
 ## Phase 1: Setup
 
-- [ ] T001 Verify baseline: `swift build` clean and `swift test` green on the branch point (record output; constitution Principle II)
+- [x] T001 Verify baseline: `swift build` clean and `swift test` green on the branch point (record output; constitution Principle II)
 
 ## Phase 2: Foundational (blocking prerequisites)
 
-- [ ] T002 Extract the shared validation rulebook (trim, ≤160 cap, non-empty, dedupe, candidate cap) from the private helpers of `Sources/BarkCore/Suggest/SuggestionResponseParser.swift` into an internal type both parsers use; batch parser behavior unchanged (existing `SuggestionResponseParserTests` stay green)
-- [ ] T003 [P] Add `suggestStream(_:) -> AsyncThrowingStream<String, Error>` to the protocol with the batch-wrapping default per `contracts/streaming-engine.md` in `Sources/BarkCore/Suggest/SuggestionEngine.swift`
-- [ ] T004 Implement `SuggestionStreamParser` (pure, prefix-stable incremental extraction: think-span hold-back, quote/escape-aware JSON string elements, marker-line completion on newline, shared validation) in `Sources/BarkCore/Suggest/SuggestionStreamParser.swift`
-- [ ] T005 Write `Tests/BarkCoreTests/SuggestionStreamParserTests.swift`: chunked parity corpus (every batch-parser fixture split at every index + multi-split cases ⇒ incremental emissions + `finish()` == batch parse, SC-002), conservatism (unclosed think span / string literal never emitted), monotonicity, dedupe across arrivals, cap enforcement
+- [x] T002 Extract the shared validation rulebook (trim, ≤160 cap, non-empty, dedupe, candidate cap) from the private helpers of `Sources/BarkCore/Suggest/SuggestionResponseParser.swift` into an internal type both parsers use; batch parser behavior unchanged (existing `SuggestionResponseParserTests` stay green)
+- [x] T003 [P] Add `suggestStream(_:) -> AsyncThrowingStream<String, Error>` to the protocol with the batch-wrapping default per `contracts/streaming-engine.md` in `Sources/BarkCore/Suggest/SuggestionEngine.swift`
+- [x] T004 Implement `SuggestionStreamParser` (pure, prefix-stable incremental extraction: think-span hold-back, quote/escape-aware JSON string elements, marker-line completion on newline, shared validation) in `Sources/BarkCore/Suggest/SuggestionStreamParser.swift`
+- [x] T005 Write `Tests/BarkCoreTests/SuggestionStreamParserTests.swift`: chunked parity corpus (every batch-parser fixture split at every index + multi-split cases ⇒ incremental emissions + `finish()` == batch parse, SC-002), conservatism (unclosed think span / string literal never emitted), monotonicity, dedupe across arrivals, cap enforcement
 
 **Checkpoint**: Pure streaming machinery proven — no UI or controller changes yet; `swift test` green.
 
@@ -26,14 +26,14 @@
 
 **Independent test**: Scripted streaming fake engine → overlay rows appear one at a time in arrival order, numbering never changes, footer clears on finish; zero-candidate stream ⇒ existing error state.
 
-- [ ] T006 [US1] Replace `.candidatesReady` with `.candidateArrived(String)` + `.generationFinished`, add `isStreaming`, per data-model.md transition table in `Sources/BarkCore/Suggest/SuggestionSession.swift`
-- [ ] T007 [US1] Update `Tests/BarkCoreTests/SuggestionSessionTests.swift` for the incremental events: first-arrival → `.presenting`, append in `.presenting`, `generationFinished` in both phases, zero-candidate guard, safety valves unchanged
-- [ ] T008 [P] [US1] Implement native `suggestStream` yielding each `streamDetails` chunk (respecting `suggestOutputCharBound`) in `Sources/BarkCleanupMLX/MLXTextCleaner+Suggest.swift`
-- [ ] T009 [US1] Rework `runFlow` to iterate `engine.suggestStream` through `SuggestionStreamParser` in a dedicated `generationTask` (separate from `flowTask`), publishing `.candidateArrived` per candidate and `.generationFinished`/timeout per FR-011, `passToken`-guarded, external→local fallback re-entering the same loop, in `Sources/Bark/SuggestionController.swift`
-- [ ] T010 [P] [US1] Progressive rows + "more coming…" footer while `isStreaming`, footer-aware `size(for:)`, Other… row present from `.generating` in `Sources/Bark/UI/SuggestionOverlayView.swift`
-- [ ] T011 [US1] Take key from `.generating` (capture already complete; R3 preserved at `.capturing`) in `Sources/Bark/SuggestionOverlayController.swift`
-- [ ] T012 [US1] Create `Tests/BarkAppTests/SuggestionStreamingFlowTests.swift`: streaming fake engine end-to-end — progressive arrival order, stable numbering, footer lifecycle, zero-candidate error, deadline-with-partial-set completes normally (FR-011)
-- [ ] T013 [US1] Update `Tests/BarkAppTests/SuggestionControllerFlowTests.swift` (and any other 015 flow tests referencing `.candidatesReady`) to the incremental events; all 015 scenarios stay green via the batch default (SC-005 regression gate)
+- [x] T006 [US1] Replace `.candidatesReady` with `.candidateArrived(String)` + `.generationFinished`, add `isStreaming`, per data-model.md transition table in `Sources/BarkCore/Suggest/SuggestionSession.swift`
+- [x] T007 [US1] Update `Tests/BarkCoreTests/SuggestionSessionTests.swift` for the incremental events: first-arrival → `.presenting`, append in `.presenting`, `generationFinished` in both phases, zero-candidate guard, safety valves unchanged
+- [x] T008 [P] [US1] Implement native `suggestStream` yielding each `streamDetails` chunk (respecting `suggestOutputCharBound`) in `Sources/BarkCleanupMLX/MLXTextCleaner+Suggest.swift`
+- [x] T009 [US1] Rework `runFlow` to iterate `engine.suggestStream` through `SuggestionStreamParser` in a dedicated `generationTask` (separate from `flowTask`), publishing `.candidateArrived` per candidate and `.generationFinished`/timeout per FR-011, `passToken`-guarded, external→local fallback re-entering the same loop, in `Sources/Bark/SuggestionController.swift`
+- [x] T010 [P] [US1] Progressive rows + "more coming…" footer while `isStreaming`, footer-aware `size(for:)`, Other… row present from `.generating` in `Sources/Bark/UI/SuggestionOverlayView.swift`
+- [x] T011 [US1] Take key from `.generating` (capture already complete; R3 preserved at `.capturing`) in `Sources/Bark/SuggestionOverlayController.swift`
+- [x] T012 [US1] Create `Tests/BarkAppTests/SuggestionStreamingFlowTests.swift`: streaming fake engine end-to-end — progressive arrival order, stable numbering, footer lifecycle, zero-candidate error, deadline-with-partial-set completes normally (FR-011)
+- [x] T013 [US1] Update `Tests/BarkAppTests/SuggestionControllerFlowTests.swift` (and any other 015 flow tests referencing `.candidatesReady`) to the incremental events; all 015 scenarios stay green via the batch default (SC-005 regression gate)
 
 **Checkpoint**: MVP shippable — streaming visible end-to-end with the local engine; degrade path proven.
 
@@ -43,9 +43,9 @@
 
 **Independent test**: Slow streaming fake → select row 1 while 3–4 pending: exact text injected, generation cancelled, no late UI; Escape/focus-loss variants inject nothing.
 
-- [ ] T014 [US2] Cancel `generationTask` before injection/dictation/dismissal in `choose(_:)`, `acceptHighlighted()`, `chooseOther()`, `dismiss()`; allow `.chooseOther` from `.generating`; highlight-on-Other tracks the Other row across appends per data-model.md in `Sources/Bark/SuggestionController.swift` + `Sources/BarkCore/Suggest/SuggestionSession.swift`
-- [ ] T015 [US2] Extend `Tests/BarkCoreTests/SuggestionSessionTests.swift`: `.chooseOther` legal in `.generating`, highlight stability when a candidate arrives while Other… is highlighted
-- [ ] T016 [US2] Extend `Tests/BarkAppTests/SuggestionStreamingFlowTests.swift`: early selection mid-stream (exact text, engine sees cancellation, no post-dismiss publishes — SC-003/SC-004), Escape and focus-loss mid-stream, Other… during `.generating` starts one-shot dictation and abandons generation
+- [x] T014 [US2] Cancel `generationTask` before injection/dictation/dismissal in `choose(_:)`, `acceptHighlighted()`, `chooseOther()`, `dismiss()`; allow `.chooseOther` from `.generating`; highlight-on-Other tracks the Other row across appends per data-model.md in `Sources/Bark/SuggestionController.swift` + `Sources/BarkCore/Suggest/SuggestionSession.swift`
+- [x] T015 [US2] Extend `Tests/BarkCoreTests/SuggestionSessionTests.swift`: `.chooseOther` legal in `.generating`, highlight stability when a candidate arrives while Other… is highlighted
+- [x] T016 [US2] Extend `Tests/BarkAppTests/SuggestionStreamingFlowTests.swift`: early selection mid-stream (exact text, engine sees cancellation, no post-dismiss publishes — SC-003/SC-004), Escape and focus-loss mid-stream, Other… during `.generating` starts one-shot dictation and abandons generation
 
 **Checkpoint**: The latency win is bankable — users act on the first good candidate.
 
@@ -55,13 +55,13 @@
 
 **Independent test**: Instrumented fakes record ordering: prepare begins before capture completes; secure-field refusal ⇒ zero engine calls.
 
-- [ ] T017 [P] [US3] Add prewarm-ordering + refusal-abandons-preparation tests with instrumented fake capture/engine in `Tests/BarkAppTests/SuggestionStreamingFlowTests.swift`
+- [x] T017 [P] [US3] Add prewarm-ordering + refusal-abandons-preparation tests with instrumented fake capture/engine in `Tests/BarkAppTests/SuggestionStreamingFlowTests.swift`
 
 ## Phase 6: Polish & Cross-Cutting
 
-- [ ] T018 Full-suite gate: `swift build` clean + `swift test` green, output captured (constitution Principle II)
+- [x] T018 Full-suite gate: `swift build` clean + `swift test` green, output captured (constitution Principle II)
 - [ ] T019 [P] Record SC-001 TTFC baseline vs branch (median of ≥5 runs, reference machine, per quickstart.md) in the PR description
-- [ ] T020 [P] Docs touch-up: verify `specs/016-streaming-suggestions/quickstart.md` manual QA steps match the shipped UI copy; note the R2 (no-SSE) residual in `contracts/streaming-engine.md` if the client shape changed during implementation
+- [x] T020 [P] Docs touch-up: verify `specs/016-streaming-suggestions/quickstart.md` manual QA steps match the shipped UI copy; note the R2 (no-SSE) residual in `contracts/streaming-engine.md` if the client shape changed during implementation
 
 ## Dependencies & Execution Order
 
