@@ -1,0 +1,173 @@
+import SwiftUI
+import BarkCore
+
+/// The discussion panel content (017): transcript, the AI's current question,
+/// state indicators, and the action row (Recapture / Done / Cancel — or the
+/// preview's Confirm / Resume / Copy / Cancel).
+struct DiscussionOverlayView: View {
+    let controller: DiscussionController
+
+    static func size(for session: DiscussionSession) -> CGSize {
+        switch session.state {
+        case .previewing, .injecting:
+            return CGSize(width: 460, height: 400)
+        default:
+            return CGSize(width: 460, height: 330)
+        }
+    }
+
+    private var session: DiscussionSession { controller.session }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            header
+            if session.state == .previewing || session.state == .injecting {
+                preview
+            } else {
+                transcript
+            }
+            if let error = controller.lastError, !error.isEmpty {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+                    .lineLimit(2)
+            }
+            actions
+        }
+        .padding(12)
+        .frame(width: Self.size(for: session).width, height: Self.size(for: session).height, alignment: .top)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var header: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "bubble.left.and.bubble.right")
+                .foregroundStyle(Color.accentColor)
+            Text("Discussion").font(.headline)
+            Text(stateLabel).font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            if !session.hasContext, session.state != .idle, session.state != .capturing {
+                Label("No context", systemImage: "eye.slash")
+                    .font(.caption2).foregroundStyle(.secondary)
+                    .help("Bark couldn't read the window — the discussion runs without screen context.")
+            }
+        }
+    }
+
+    private var stateLabel: String {
+        switch session.state {
+        case .idle: return ""
+        case .capturing: return "Reading the window…"
+        case .thinking: return "Thinking…"
+        case .presenting: return "Speaking…"
+        case .awaitingUser:
+            return controller.micMode == .ptt ? "Your turn — tap the hotkey to talk" : "Your turn — just speak"
+        case .listening: return controller.micMode == .ptt ? "Listening — tap again to finish" : "Listening…"
+        case .transcribing: return "Transcribing…"
+        case .turnFailed: return "The engine failed"
+        case .synthesizing: return "Drafting…"
+        case .synthesisFailed: return "Drafting failed"
+        case .previewing: return "Review the draft"
+        case .injecting: return "Inserting…"
+        case .finished, .cancelled: return ""
+        }
+    }
+
+    private var transcript: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(session.transcript.enumerated()), id: \.offset) { index, turn in
+                        turnRow(turn, isCurrent: index == session.transcript.count - 1)
+                            .id(index)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .onChange(of: session.transcript.count) { _, count in
+                if count > 0 { proxy.scrollTo(count - 1, anchor: .bottom) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func turnRow(_ turn: DialogueTurn, isCurrent: Bool) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(turn.role == .user ? "You" : "AI")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(turn.role == .user ? Color.secondary : Color.accentColor)
+                .frame(width: 26, alignment: .trailing)
+            Text(turn.text)
+                .font(turn.role == .assistant && isCurrent ? .body.weight(.medium) : .callout)
+                .foregroundStyle(turn.role == .assistant && isCurrent ? .primary : .secondary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var preview: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Final draft").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            ScrollView {
+                Text(session.synthesizedPrompt ?? "")
+                    .font(.body)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(8)
+            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    @ViewBuilder
+    private var actions: some View {
+        switch session.state {
+        case .previewing:
+            HStack {
+                Button("Confirm ⏎") { controller.confirm() }
+                    .buttonStyle(.borderedProminent)
+                Button("Resume (R)") { controller.resume() }
+                Button("Copy (C)") { controller.copyPrompt() }
+                Spacer()
+                Button("Cancel (Esc)", role: .cancel) { controller.cancel() }
+            }
+            .controlSize(.small)
+        case .turnFailed:
+            HStack {
+                Button("Retry") { controller.retryTurn() }
+                    .buttonStyle(.borderedProminent)
+                Button("Done — draft it (D)") { controller.done() }
+                Spacer()
+                Button("Cancel (Esc)", role: .cancel) { controller.cancel() }
+            }
+            .controlSize(.small)
+        case .synthesisFailed:
+            HStack {
+                Button("Retry draft") { controller.retrySynthesis() }
+                    .buttonStyle(.borderedProminent)
+                if session.synthesisFailures >= 2 {
+                    Button("Copy transcript (C)") { controller.copyTranscript() }
+                }
+                Spacer()
+                Button("Cancel (Esc)", role: .cancel) { controller.cancel() }
+            }
+            .controlSize(.small)
+        case .awaitingUser, .presenting, .listening, .transcribing, .thinking:
+            HStack {
+                if session.readySignaled {
+                    Button("Done — draft it (D)") { controller.done() }
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Done — draft it (D)") { controller.done() }
+                        .buttonStyle(.bordered)
+                }
+                Button("Recapture") { controller.recapture() }
+                    .help("Re-read the target window so the discussion sees its current content.")
+                Spacer()
+                Button("Cancel (Esc)", role: .cancel) { controller.cancel() }
+            }
+            .controlSize(.small)
+        default:
+            EmptyView()
+        }
+    }
+}

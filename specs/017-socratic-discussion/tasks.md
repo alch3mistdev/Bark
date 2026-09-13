@@ -75,7 +75,7 @@ engine readiness produces a previewed prompt; Confirm injects it safely into the
 **Independent test** (spec US1): focus an editor, F7, 2–3 voice turns, Done, Confirm → prompt
 lands at the cursor; nothing typed anywhere else.
 
-- [ ] T012 [US1] Create `DiscussionController` skeleton in
+- [X] T012 [US1] Create `DiscussionController` skeleton in
       `Sources/Bark/DiscussionController.swift`: injected seams (settings, dialogue engines
       local/external via factory closure, capture, audioFactory, STT factory, injectors,
       dictation controller for lease/suspend, synthesizer optional, settleDelay/deadlines),
@@ -86,19 +86,19 @@ lands at the cursor; nothing typed anywhere else.
       resuming hands-free if it was on. Flow tests first in
       `Tests/BarkAppTests/DiscussionControllerFlowTests.swift` (begin happy/refused/degraded,
       teardown wipe, lease+suspend/resume, disabled ⇒ hotkey no-op)
-- [ ] T013 [US1] Implement the user-turn capture loop in `DiscussionController`: PTT mode
+- [X] T013 [US1] Implement the user-turn capture loop in `DiscussionController`: PTT mode
       (key-down `beginStream`+feed, key-up `finishStream` under deadline) and VAD mode
       (mirror `runHandsFree`: preroll, onset/hangover, 30 s cap — but output = transcript
       only, no cleanup/injection); empty-final ⇒ `awaitingUser`. Tests with
       `ScriptedAudioCapture`/`ScriptedSTTEngine` in both modes
-- [ ] T014 [US1] Implement the engine loop in `DiscussionController`: opening question after
+- [X] T014 [US1] Implement the engine loop in `DiscussionController`: opening question after
       capture; per-turn `reply` under 20 s deadline via prompt builder; parse via
       `DialogueReplyParser`; `isSynthesisTrigger` ⇒ synthesize; `ready=true` surfaced to UI
       state; `doneRequested` from any allowed state; `synthesize` under 30 s deadline with
       4 000-char bound + `retrySynthesis`; `engineFailed` ⇒ `turnFailed` with transcript
       retained. Tests with `FakeDialogueEngine` (scripted ready flow, trigger flow, failure,
       deadline via hanging engine)
-- [ ] T015 [US1] Implement preview + injection handoff in `DiscussionController`: Confirm ⇒
+- [X] T015 [US1] Implement preview + injection handoff in `DiscussionController`: Confirm ⇒
       settle delay → `TextSanitizer` (newlines allowed unless terminal) →
       `InjectionRouter.strategy(routing:isTerminal:)` → injector (preflight does PID
       re-verify + secure-field refusal); `injectionFailed` ⇒ back to `previewing` with
@@ -106,29 +106,29 @@ lands at the cursor; nothing typed anywhere else.
       `ReturnKeySynthesizing` anywhere in this file. Tests with `FakeInjector`
       (`focusChanged`, `secure`, success), no-Return assertion (fake synthesizer count
       stays 0), history store untouched
-- [ ] T016 [US1] Create `DiscussionOverlayController` + `DiscussionPanel` in
+- [X] T016 [US1] Create `DiscussionOverlayController` + `DiscussionPanel` in
       `Sources/Bark/DiscussionOverlayController.swift` cloning the 015 panel pattern
       (non-activating borderless key panel; **not key during `capturing`**, key from
       `thinking` onward; `HUDPlacement.bottomCenter` + caret refine; resign-key ⇒ controller
       cancel unless self-hidden)
-- [ ] T017 [US1] Create `DiscussionOverlayView` in
+- [X] T017 [US1] Create `DiscussionOverlayView` in
       `Sources/Bark/UI/DiscussionOverlayView.swift`: scrolling transcript, prominent current
       AI question, state/"no context" indicators, Done/Cancel buttons, ready-highlighted
       Done, preview pane with Confirm/Resume/Cancel + failure reason + Copy prompt; key
       handling decoder in `Sources/BarkCore/Discuss/DiscussionKeyDecoder.swift` (Esc=cancel,
       Return=Confirm **only inside preview**, D=Done) with tests in
       `Tests/BarkCoreTests/DiscussionKeyDecoderTests.swift`
-- [ ] T018 [US1] Create the settings pane in
+- [X] T018 [US1] Create the settings pane in
       `Sources/Bark/UI/Settings/DiscussionPane.swift` (enable, hotkey recorder, mic mode,
       TTS toggle, shared-backend note + strengthened ADR-010 privacy copy naming multi-turn
       transcripts) and add the `discussion` case to `Sources/Bark/UI/SettingsView.swift`;
       controller-side computed settings vars with collision-guard refusals in
       `DiscussionController`
-- [ ] T019 [US1] Wire production graph in `Sources/Bark/CompositionRoot.swift`
+- [X] T019 [US1] Wire production graph in `Sources/Bark/CompositionRoot.swift`
       (fourth `HotkeyManager`, local engine = `dictation.llmCleaner as? DialogueEngine`,
       external factory closure, `ContextCaptureService`, injectors, synthesizer) and
       activate + phase-multiplex in `Sources/Bark/BarkApp.swift`
-- [ ] T020 [US1] US1 checkpoint: end-to-end flow tests green in both mic modes
+- [X] T020 [US1] US1 checkpoint: end-to-end flow tests green in both mic modes
       (`DiscussionControllerFlowTests`), full `swift build` + `swift test` output captured,
       and existing 015/016/dictation suites unchanged (SC-003)
 
@@ -142,7 +142,7 @@ skips playback.
 **Independent test** (spec US2): TTS + hands-free, 3-turn session by the speakers → zero
 AI-spoken words in user turns.
 
-- [ ] T021 [P] [US2] Implement `AVSpeechSynthesizerEngine`
+- [X] T021 [P] [US2] Implement `AVSpeechSynthesizerEngine`
       (delegate didFinish/didCancel → `CheckedContinuation`; system voice; `stop()`
       idempotent; failure ⇒ prompt return, log only) in
       `Sources/BarkEngines/Speech/AVSpeechSynthesizerEngine.swift`

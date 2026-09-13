@@ -144,6 +144,8 @@ public final class DictationController {
     /// conforms to `SuggestionEngine`) and the same history store — exposed for
     /// `CompositionRoot` wiring only.
     var sharedSuggestionEngine: SuggestionEngine? { llmCleaner as? SuggestionEngine }
+    /// 017: the discussion dialogue rides the same residency.
+    var sharedDialogueEngine: DialogueEngine? { llmCleaner as? DialogueEngine }
     var sharedHistoryStore: HistoryStore? { history }
 
     // MARK: - Settings-derived state (UI binds here; writes persist)

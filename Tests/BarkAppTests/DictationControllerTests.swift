@@ -222,7 +222,7 @@ final class DictationControllerTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(80))
         XCTAssertEqual(c.phase, .listening)
 
-        c.hotkeySetting = HotkeySetting(kind: .keyToggle, keyCode: 98, modifierFlags: 0)  // F7 (≠ hands-free F5, ≠ suggestions F6)
+        c.hotkeySetting = HotkeySetting(kind: .keyToggle, keyCode: 100, modifierFlags: 0)  // F8 (≠ hands-free F5, ≠ suggestions ⌃⌥S, ≠ discussion F7)
         await waitForTerminal(c)
 
         XCTAssertFalse(c.phase.isActive)   // not stuck listening

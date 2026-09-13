@@ -10,10 +10,12 @@ import BarkCleanupMLX
 /// or cleaner here without touching the pipeline (ADR-002 / ADR-003 / ADR-006).
 @MainActor
 enum CompositionRoot {
-    /// Build the dictation conductor and the suggestion controller together so
-    /// they share the settings store, history store, and (in the MLX build)
-    /// the ONE loaded LLM residency (015 R1/R2).
-    static func makeControllers() -> (dictation: DictationController, suggestions: SuggestionController) {
+    /// Build the dictation conductor and the suggestion + discussion
+    /// controllers together so they share the settings store, history store,
+    /// and (in the MLX build) the ONE loaded LLM residency (015 R1/R2, 017).
+    static func makeControllers() -> (dictation: DictationController,
+                                      suggestions: SuggestionController,
+                                      discussion: DiscussionController) {
         let dictation = makeController()
         let suggestions = SuggestionController(
             settings: dictation.settings,
@@ -26,7 +28,26 @@ enum CompositionRoot {
             },
             history: dictation.sharedHistoryStore
         )
-        return (dictation, suggestions)
+        // The discussion runs its own STT instance (the mic lease guarantees
+        // it never races dictation's) and its own turn audio engines.
+        let discussionSTT: STTEngine = STTEngineFactory.make(
+            id: dictation.settings.settings.sttBackend,
+            manifest: STTEngineFactory.bundledManifest(for: dictation.settings.settings.sttBackend),
+            downloader: ModelDownloader()
+        )
+        let discussion = DiscussionController(
+            settings: dictation.settings,
+            dictation: dictation,
+            hotkey: HotkeyManager(),
+            capture: ContextCaptureService(ocr: WindowOCRReader()),
+            localEngine: dictation.sharedDialogueEngine,
+            externalEngineProvider: { endpoint, model, apiKey in
+                OpenAICompatClient(endpoint: endpoint, model: model, apiKey: apiKey)
+            },
+            stt: discussionSTT,
+            synthesizer: AVSpeechSynthesizerEngine()
+        )
+        return (dictation, suggestions, discussion)
     }
 
     static func makeController() -> DictationController {

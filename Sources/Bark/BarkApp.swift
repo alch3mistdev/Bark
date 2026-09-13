@@ -23,15 +23,19 @@ struct BarkApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let controller: DictationController
     let suggestions: SuggestionController
+    let discussion: DiscussionController
     private var onboardingWindow: NSWindow?
-    private lazy var windowManager = WindowManager(controller: controller, suggestions: suggestions)
+    private lazy var windowManager = WindowManager(controller: controller, suggestions: suggestions,
+                                                   discussion: discussion)
     private lazy var hud = RecordingHUDController(controller: controller)
     private lazy var suggestionOverlay = SuggestionOverlayController(controller: suggestions)
+    private lazy var discussionOverlay = DiscussionOverlayController(controller: discussion)
 
     override init() {
         let made = CompositionRoot.makeControllers()
         controller = made.dictation
         suggestions = made.suggestions
+        discussion = made.discussion
         super.init()
     }
 
@@ -47,8 +51,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.onHandsFreeChange = { [weak self] active in self?.hud.setHandsFree(active) }
         suggestions.onSessionChange = { [weak self] session in self?.suggestionOverlay.handleSession(session) }
+        discussion.onSessionChange = { [weak self] session in self?.discussionOverlay.handleSession(session) }
         controller.activate()
         suggestions.activate()
+        discussion.activate()
         if !controller.hasCompletedOnboarding {
             showOnboarding()
         }
