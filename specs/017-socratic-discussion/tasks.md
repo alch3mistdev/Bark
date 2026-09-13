@@ -146,14 +146,14 @@ AI-spoken words in user turns.
       (delegate didFinish/didCancel → `CheckedContinuation`; system voice; `stop()`
       idempotent; failure ⇒ prompt return, log only) in
       `Sources/BarkEngines/Speech/AVSpeechSynthesizerEngine.swift`
-- [ ] T022 [US2] Wire TTS gating into `DiscussionController`: after presenting text, `await
+- [X] T022 [US2] Wire TTS gating into `DiscussionController`: after presenting text, `await
       speak(reply)` when enabled, then dispatch `presentationFinished`; key-tap during
       playback ⇒ `stop()` (skip) and open the turn; mic arming allowed **only** in
       `awaitingUser`/`listening` (data-model invariant 1). Tests first: gated
       `FakeSpeechSynthesizer` proves no audio-capture start occurs while `speak` is
       suspended (SC-002), skip releases immediately, TTS-off path dispatches
       `presentationFinished` synchronously
-- [ ] T023 [US2] TTS degrade test in `DiscussionControllerFlowTests`: synthesizer that
+- [X] T023 [US2] TTS degrade test in `DiscussionControllerFlowTests`: synthesizer that
       returns instantly (simulated failure) ⇒ session proceeds text-only, no error surfaced
       (US2/AS3)
 
@@ -166,13 +166,13 @@ AI-spoken words in user turns.
 **Independent test** (spec US3): change target window content, Recapture, "what do you see
 now?" → grounded reply. Kill engine mid-session → retry/Done offered, transcript intact.
 
-- [ ] T024 [US3] Implement Recapture: overlay button (allowed in
+- [X] T024 [US3] Implement Recapture: overlay button (allowed in
       `awaitingUser`/`presenting`/`turnFailed`) → re-run capture against the session target,
       **replace** the snapshot on success, keep the previous snapshot with a notice on
       failure; subsequent prompts rebuild from the new snapshot (stateless per-turn build
       makes this free). Tests: `FakeContextCapture` swap changes the context block in the
       next `FakeDialogueEngine`-received prompt; failed recapture retains prior context
-- [ ] T025 [US3] Implement failure affordances end-to-end: `turnFailed` UI (Retry / Done /
+- [X] T025 [US3] Implement failure affordances end-to-end: `turnFailed` UI (Retry / Done /
       Cancel), `synthesisFailed` retry, second synthesis failure ⇒ "Copy transcript"
       (clipboard via `ClipboardInjector`, secure-field-guarded), injection-failure preview
       copy path. Tests: transcript-never-lost across every failure path (SC-004), twice-failed
