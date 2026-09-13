@@ -28,6 +28,11 @@ public final class DictationController {
     public private(set) var isModelReady = false
     public private(set) var llmStatus: LLMStatus = .unavailable
     public private(set) var handsFreeActive = false
+    /// 017: hard mic interlock. While a discussion session holds the lease,
+    /// dictation and hands-free refuse to start — advisory phase reads are not
+    /// enough, since a second controller could otherwise open its own
+    /// `AudioCapturing` concurrently.
+    public var micLeaseHeld = false
     public private(set) var isReinserting = false   // serializes one-click re-insert (Codex)
     public private(set) var inputLevel: Float = 0    // 0...1 smoothed mic level for the HUD meter
     public private(set) var speakerEnrolled = false  // a usable voiceprint is loaded (011)
@@ -178,6 +183,10 @@ public final class DictationController {
             }
             guard newValue != settings.settings.suggestionsHotkey else {   // 3-way guard (015)
                 lastError = "That key is already the suggestions hotkey."
+                return
+            }
+            guard newValue != settings.settings.discussionHotkey else {   // 4-way guard (017)
+                lastError = "That key is already the discussion hotkey."
                 return
             }
             // Rebinding mid-session would strand a live session on the old key (Codex).
@@ -585,7 +594,7 @@ public final class DictationController {
     // MARK: - Start / stop
 
     public func startDictation() {
-        guard !machine.isActive, !handsFreeActive else { return }   // one mic owner at a time
+        guard !machine.isActive, !handsFreeActive, !micLeaseHeld else { return }   // one mic owner at a time
         // Recover from a previous .completed / .failed run so the hotkey always works.
         if machine.phase != .idle { machine.handle(.reset) }
         lastError = nil; lastErrorPermission = nil
@@ -1050,6 +1059,10 @@ public final class DictationController {
                 lastError = "That key is already the suggestions hotkey."
                 return
             }
+            guard newValue != settings.settings.discussionHotkey else {   // 4-way guard (017)
+                lastError = "That key is already the discussion hotkey."
+                return
+            }
             settings.update { $0.handsFreeHotkey = newValue }
             handsFreeHotkey.update(HotkeyConfig(newValue))
         }
@@ -1149,7 +1162,7 @@ public final class DictationController {
     }
 
     public func startHandsFree() {
-        guard !handsFreeActive, !machine.isActive else { return }  // one mic owner
+        guard !handsFreeActive, !machine.isActive, !micLeaseHeld else { return }  // one mic owner
         lastError = nil; lastErrorPermission = nil
         guard permissions.microphone == .granted else {
             fail("Microphone access is required. Grant it in System Settings.")

@@ -13,52 +13,52 @@ US2 = TTS half-duplex; US3 = recapture + failure UX.
 
 ## Phase 1: Setup
 
-- [ ] T001 Record baseline: `swift build` clean and `swift test` green on branch
+- [X] T001 Record baseline: `swift build` clean and `swift test` green on branch
       `017-socratic-discussion` before any change (constitution II evidence; paste summary
       counts into the PR description later)
 
 ## Phase 2: Foundational (blocking prerequisites for all stories)
 
-- [ ] T002 [P] Define `DialogueRole`, `DialogueTurn`, `DialogueReply` (incl.
+- [X] T002 [P] Define `DialogueRole`, `DialogueTurn`, `DialogueReply` (incl.
       `isSynthesisTrigger`), `DialogueError`, and the `DialogueEngine` protocol per
       `contracts/dialogue-engine.md` in `Sources/BarkCore/Discuss/DialogueEngine.swift`
-- [ ] T003 [P] Implement tolerant reply parsing (first-JSON-object extraction; fail-safe
+- [X] T003 [P] Implement tolerant reply parsing (first-JSON-object extraction; fail-safe
       `ready=false` on any malformed input) in
       `Sources/BarkCore/Discuss/DialogueReplyParser.swift` with tests first in
       `Tests/BarkCoreTests/DialogueReplyParserTests.swift` (plain JSON, fenced/prose-wrapped
       JSON, empty-reply trigger shape, garbage, prompt-injection lookalikes)
-- [ ] T004 [P] Implement `DialoguePromptBuilder` (fixed guardrail; Socratic system prompt with
+- [X] T004 [P] Implement `DialoguePromptBuilder` (fixed guardrail; Socratic system prompt with
       the `{"reply","ready"}` output contract and the empty-reply-on-confirm rule; synthesis
       system prompt; fenced `<screen_context>`/`<focused_field>`/`<user_turn>` blocks with
       fixed-point `neutralize` copied from `SuggestionPrompt`) in
       `Sources/BarkCore/Discuss/DialoguePromptBuilder.swift` with tests first in
       `Tests/BarkCoreTests/DialoguePromptBuilderTests.swift` (fence-reassembly fixed point,
       context+turns assembly, no-context variant)
-- [ ] T005 Implement the `DiscussionSession` state machine exactly per `data-model.md`
+- [X] T005 Implement the `DiscussionSession` state machine exactly per `data-model.md`
       (states, events, transitions, invariants 2/3/5, illegal-pair no-ops) in
       `Sources/BarkCore/Discuss/DiscussionSession.swift` with tests first in
       `Tests/BarkCoreTests/DiscussionSessionTests.swift` (every legal transition,
       cancel-from-every-non-terminal, resume discards prompt, synthesis-failure counter,
       empty-transcript-final returns to `awaitingUser`)
-- [ ] T006 [P] Add `SpeechSynthesizing` protocol per `contracts/speech-synthesizer.md` in
+- [X] T006 [P] Add `SpeechSynthesizing` protocol per `contracts/speech-synthesizer.md` in
       `Sources/BarkCore/Speech/SpeechSynthesizing.swift`
-- [ ] T007 [P] Add Settings fields `discussionEnabled=false`, `discussionHotkey` (F7/keyCode 98
+- [X] T007 [P] Add Settings fields `discussionEnabled=false`, `discussionHotkey` (F7/keyCode 98
       toggle), `discussionMicMode: DiscussionMicMode = .ptt`, `discussionTTSEnabled=false`
       with tolerant-decoder lines in `Sources/BarkCore/Settings/Settings.swift`; extend
       `Tests/BarkCoreTests/SettingsCodecTests.swift` (old-blob decode keeps defaults)
-- [ ] T008 [P] Conform `MLXTextCleaner` to `DialogueEngine` (fresh
+- [X] T008 [P] Conform `MLXTextCleaner` to `DialogueEngine` (fresh
       `ChatSession(container, instructions:, history:)` per call, maxTokens 256 reply /
       512 synthesize, temp 0; lean-build stub throws `engineUnavailable`) in
       `Sources/BarkCleanupMLX/MLXTextCleaner+Dialogue.swift`
-- [ ] T009 [P] Conform `OpenAICompatClient` to `DialogueEngine` (messages =
+- [X] T009 [P] Conform `OpenAICompatClient` to `DialogueEngine` (messages =
       `[system] + turns`; reuse existing wire types/session) in
       `Sources/BarkEngines/Suggest/OpenAICompatClient.swift`; extend
       `Tests/BarkAppTests/OpenAICompatClientTests.swift` (multi-turn body shape, role
       mapping, error mapping)
-- [ ] T010 [P] Add shared fakes `FakeDialogueEngine` (scripted replies/errors, records
+- [X] T010 [P] Add shared fakes `FakeDialogueEngine` (scripted replies/errors, records
       received turns) and `FakeSpeechSynthesizer` (gated `speak` suspension, `stop()`
       release, spoken log) in `Tests/BarkAppTests/Fakes.swift`
-- [ ] T011 Add the mic lease + 4-way hotkey guard: `micLeaseHeld` checked in
+- [X] T011 Add the mic lease + 4-way hotkey guard: `micLeaseHeld` checked in
       `startDictation`/`startHandsFree` guards and the hotkey-collision checks extended to
       the discussion key in `Sources/Bark/DictationController.swift` and
       `Sources/Bark/SuggestionController.swift`; tests first in

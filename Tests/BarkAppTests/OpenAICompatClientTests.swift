@@ -87,6 +87,60 @@ final class OpenAICompatClientTests: XCTestCase {
         XCTAssertEqual(messages[1]["content"] as? String, "usr")
     }
 
+    func testDialogueReplyMapsTranscriptToMessagesArray() async throws {
+        // 017: system + every turn, in order, with 1:1 role mapping.
+        StubURLProtocol.handler = respond(status: 200, body: #"""
+            {"choices":[{"message":{"content":"{\"reply\":\"Which tone?\",\"ready\":false}"}}]}
+            """#)
+        let turns = [
+            DialogueTurn(role: .assistant, text: "What's the goal?"),
+            DialogueTurn(role: .user, text: "a launch email"),
+        ]
+        let raw = try await makeClient().reply(system: "sys17", turns: turns)
+        XCTAssertEqual(raw, #"{"reply":"Which tone?","ready":false}"#)
+
+        let body = try XCTUnwrap(bodyData(of: StubURLProtocol.lastRequest))
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        let messages = try XCTUnwrap(json["messages"] as? [[String: Any]])
+        XCTAssertEqual(messages.map { $0["role"] as? String }, ["system", "assistant", "user"])
+        XCTAssertEqual(messages[0]["content"] as? String, "sys17")
+        XCTAssertEqual(messages[2]["content"] as? String, "a launch email")
+        XCTAssertEqual(json["max_tokens"] as? Int, 256)
+    }
+
+    func testDialogueSynthesizeUsesLargerBoundAndMapsErrors() async {
+        // 017: synthesis gets 512 tokens; SuggestionError remaps to DialogueError.
+        StubURLProtocol.handler = respond(status: 200, body: #"{"choices":[{"message":{"content":"Final."}}]}"#)
+        do {
+            let raw = try await makeClient().synthesize(system: "s", turns: [])
+            XCTAssertEqual(raw, "Final.")
+            let body = try XCTUnwrap(bodyData(of: StubURLProtocol.lastRequest))
+            let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+            XCTAssertEqual(json["max_tokens"] as? Int, 512)
+        } catch { XCTFail("\(error)") }
+
+        StubURLProtocol.handler = respond(status: 401, body: "{}")
+        do {
+            _ = try await makeClient().reply(system: "s", turns: [])
+            XCTFail("expected transport error")
+        } catch {
+            XCTAssertEqual(error as? DialogueError, .transport("HTTP 401"))
+        }
+    }
+
+    private func bodyData(of request: URLRequest?) -> Data? {
+        request?.httpBody ?? request?.httpBodyStream.map { stream -> Data in
+            stream.open(); defer { stream.close() }
+            var data = Data(); var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let read = stream.read(&buffer, maxLength: buffer.count)
+                guard read > 0 else { break }
+                data.append(buffer, count: read)
+            }
+            return data
+        }
+    }
+
     func testNoAuthorizationHeaderWithoutKey() async throws {
         StubURLProtocol.handler = respond(status: 200, body: #"{"choices":[{"message":{"content":"[]"}}]}"#)
         _ = try await makeClient(apiKey: nil).suggest(request)

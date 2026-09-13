@@ -99,6 +99,12 @@ public struct Settings: Codable, Sendable, Equatable {
     public var externalLLMModel: String       // chat-completions model name
     public var suggestionAutoSubmit: Bool     // ADR-010 exception: opt-in Return after a picked suggestion
 
+    // Socratic discussion (017). Shares the 015 backend/endpoint/key config.
+    public var discussionEnabled: Bool
+    public var discussionHotkey: HotkeySetting
+    public var discussionMicMode: DiscussionMicMode
+    public var discussionTTSEnabled: Bool
+
     public init(
         selectedModeID: String = Mode.clean.id,
         customModes: [Mode] = [],
@@ -128,7 +134,13 @@ public struct Settings: Codable, Sendable, Equatable {
         suggestionBackend: SuggestionBackendID = .local,
         externalLLMEndpoint: String = "",
         externalLLMModel: String = "",
-        suggestionAutoSubmit: Bool = false
+        suggestionAutoSubmit: Bool = false,
+        discussionEnabled: Bool = false,   // opt-in master switch (017)
+        // F7 (keyCode 98): F5 is hands-free, ⌃⌥S is suggestions; a bare
+        // function key never collides with the fn-hold push-to-talk.
+        discussionHotkey: HotkeySetting = HotkeySetting(kind: .keyToggle, keyCode: 98, modifierFlags: 0),
+        discussionMicMode: DiscussionMicMode = .ptt,   // zero false triggers out of the box
+        discussionTTSEnabled: Bool = false
     ) {
         self.selectedModeID = selectedModeID
         self.customModes = customModes
@@ -156,6 +168,10 @@ public struct Settings: Codable, Sendable, Equatable {
         self.externalLLMEndpoint = externalLLMEndpoint
         self.externalLLMModel = externalLLMModel
         self.suggestionAutoSubmit = suggestionAutoSubmit
+        self.discussionEnabled = discussionEnabled
+        self.discussionHotkey = discussionHotkey
+        self.discussionMicMode = discussionMicMode
+        self.discussionTTSEnabled = discussionTTSEnabled
     }
 
     public static let `default` = Settings()
@@ -190,6 +206,10 @@ public struct Settings: Codable, Sendable, Equatable {
         externalLLMEndpoint = try c.decodeIfPresent(String.self, forKey: .externalLLMEndpoint) ?? d.externalLLMEndpoint
         externalLLMModel = try c.decodeIfPresent(String.self, forKey: .externalLLMModel) ?? d.externalLLMModel
         suggestionAutoSubmit = try c.decodeIfPresent(Bool.self, forKey: .suggestionAutoSubmit) ?? d.suggestionAutoSubmit
+        discussionEnabled = try c.decodeIfPresent(Bool.self, forKey: .discussionEnabled) ?? d.discussionEnabled
+        discussionHotkey = try c.decodeIfPresent(HotkeySetting.self, forKey: .discussionHotkey) ?? d.discussionHotkey
+        discussionMicMode = try c.decodeIfPresent(DiscussionMicMode.self, forKey: .discussionMicMode) ?? d.discussionMicMode
+        discussionTTSEnabled = try c.decodeIfPresent(Bool.self, forKey: .discussionTTSEnabled) ?? d.discussionTTSEnabled
     }
 
     /// The mode list everything runs on: built-ins with any user prompt

@@ -402,6 +402,80 @@ final class FakeInjector: TextInjector, @unchecked Sendable {
     }
 }
 
+/// 017: dialogue engine with a scripted sequence of outcomes — each `reply`
+/// call consumes the next one; `synthesize` uses `synthesisBehavior`. Records
+/// every (system, turns) pair it receives so tests can assert grounding.
+final class FakeDialogueEngine: DialogueEngine, @unchecked Sendable {
+    enum Outcome { case ok(String), fail(DialogueError), hang }
+    private var replyScript: [Outcome]
+    private let synthesisBehavior: Outcome
+    let available: Bool
+    private(set) var replyCalls: [(system: String, turns: [DialogueTurn])] = []
+    private(set) var synthesizeCalls: [(system: String, turns: [DialogueTurn])] = []
+
+    init(replies: [Outcome], synthesis: Outcome = .ok("Final prompt."), available: Bool = true) {
+        self.replyScript = replies
+        self.synthesisBehavior = synthesis
+        self.available = available
+    }
+
+    var isAvailable: Bool { get async { available } }
+
+    func reply(system: String, turns: [DialogueTurn]) async throws -> String {
+        replyCalls.append((system, turns))
+        let outcome = replyScript.isEmpty ? .fail(.engineUnavailable) : replyScript.removeFirst()
+        return try await run(outcome)
+    }
+
+    func synthesize(system: String, turns: [DialogueTurn]) async throws -> String {
+        synthesizeCalls.append((system, turns))
+        return try await run(synthesisBehavior)
+    }
+
+    private func run(_ outcome: Outcome) async throws -> String {
+        switch outcome {
+        case .ok(let raw): return raw
+        case .fail(let error): throw error
+        case .hang: try await Task.sleep(for: .seconds(60)); return ""
+        }
+    }
+}
+
+/// 017: speech synthesizer whose `speak` suspends until the test releases it
+/// (or immediately when `gated` is false), so tests can hold TTS "mid-playback"
+/// and prove the mic never arms during it (SC-002). `stop()` releases the
+/// pending `speak`, matching the real engine's skip semantics.
+@MainActor
+final class FakeSpeechSynthesizer: SpeechSynthesizing {
+    private let gated: Bool
+    private(set) var spoken: [String] = []
+    private(set) var stopCount = 0
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    nonisolated init(gated: Bool = false) { self.gated = gated }
+
+    var speaking: Bool { !continuations.isEmpty }
+
+    func speak(_ text: String) async {
+        spoken.append(text)
+        guard gated else { return }
+        await withCheckedContinuation { continuations.append($0) }
+    }
+
+    nonisolated func stop() {
+        Task { @MainActor in
+            self.stopCount += 1
+            self.releaseAll()
+        }
+    }
+
+    func releaseAll() {
+        let pending = continuations
+        continuations.removeAll()
+        pending.forEach { $0.resume() }
+    }
+}
+
 /// Injector that suspends inside `inject` until `releaseAll()` is called, so a
 /// test can hold an injection "in flight" and prove re-insert serialization.
 @MainActor
