@@ -166,6 +166,34 @@ code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the nex
   suggestions built on it remain subject to the same output validation and are only ever inserted by an
   explicit user pick.
 
+## Discussion surface  (`BarkCore/Discuss/*`, `BarkCore/Speech/*`, `BarkEngines/Speech/*`, `Sources/Bark/Discussion*`, ADR-011, `specs/017-socratic-discussion/`)
+- ☑ **Off by default** (`Settings.discussionEnabled == false`); the F7 tap reaches other apps until the
+  user opts in (the tap starts only when enabled).
+- ☑ **Session start refuses secure fields** via the same capture path as 015 (`ContextCaptureError
+  .secureField` ⇒ session refused, FR-013); Confirm-time injection re-runs the full preflight
+  (PID re-verify + secure-field policy) inside the unchanged injectors.
+- ☑ **Transcript + capture are memory-only**: never persisted, never logged (timings only), never
+  written to history — stronger than 015: a discussion records **nothing**. Wiped on session end
+  (FR-010).
+- ☑ **Prompt-injection defense re-applied**: screen context uses the 015 fences; every user utterance
+  is fenced in `<user_turn>` blocks with fixed-point tag neutralization (`DialoguePromptBuilder`);
+  the readiness signal is a parsed JSON flag whose malformed degrade is `ready=false`, so hostile
+  screen/speech content can neither steer the system prompt nor force synthesis (FR-003/FR-011).
+- ☑ **Mic exclusivity is a hard interlock**: `DictationController.micLeaseHeld` makes both dictation
+  start paths refuse while a session runs; hands-free is suspended and auto-resumed. **Half-duplex is
+  tested**: audio capture can start only in mic-legal states, and TTS playback must complete before
+  the mic re-arms (SC-002, gated-fake test).
+- ☑ **No Return, no auto-submit**: `ReturnKeySynthesizing` is not wired into the discussion path at
+  all; the sole handoff is a previewed, user-confirmed insert through the sanitizer/router.
+- ☑ **TTS is on-device** (`AVSpeechSynthesizer`); its failure degrades to text-only silently.
+- ☑ **External endpoint reuses the ADR-010 opt-in** with strengthened warning copy: the entire
+  multi-turn conversation plus captured screen text is transmitted per turn when selected.
+- **Residual (L-19 — readiness contract):** the empty-reply synthesis trigger depends on the model
+  honoring the JSON contract; a model that never emits it simply never auto-drafts (the Done button is
+  the guaranteed path). No safety property depends on the model complying.
+- **Residual (L-20 — spoken content is audible):** TTS reads AI questions aloud; in shared spaces that
+  may disclose the discussion's topic. Off by default; the overlay always shows the same text.
+
 ## Permissions — least privilege  (`Resources/Bark.entitlements`, `PermissionsCoordinator`)
 - ☑ Only the microphone device entitlement. Accessibility + Input Monitoring are user-granted via TCC,
   requested just-in-time with purpose strings. (SEC-008 / T-011)

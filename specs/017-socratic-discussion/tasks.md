@@ -182,14 +182,14 @@ now?" → grounded reply. Kill engine mid-session → retry/Done offered, transc
 
 ## Phase 6: Polish & cross-cutting
 
-- [ ] T026 [P] Lean-build verification: `cp Package-lean.swift Package.swift && swift build`
+- [X] T026 [P] Lean-build verification: `cp Package-lean.swift Package.swift && swift build`
       — feature compiles to a disabled stub (engine unavailable ⇒ settings pane hides/greys
       the feature); restore manifest
-- [ ] T027 [P] Docs: README feature section (usage + honest limits), `docs/ADRs.md` entry
+- [X] T027 [P] Docs: README feature section (usage + honest limits), `docs/ADRs.md` entry
       (ADR-011: discussion privacy posture — memory-only transcript, shared external-endpoint
       opt-in, mic lease, no auto-submit), `docs/SECURITY.md` note (new surface: TTS output,
       discussion transcript lifecycle, unchanged injection controls)
-- [ ] T028 Final gate: `swift build` clean + full `swift test` green with output captured;
+- [X] T028 Final gate: `swift build` clean + full `swift test` green with output captured;
       tick all quickstart automated items; update spec Status → Implemented
 
 ## Dependencies & execution order

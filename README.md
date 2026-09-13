@@ -85,6 +85,15 @@ On first launch macOS will ask for three permissions (each requested just-in-tim
   with a privacy warning) any OpenAI-compatible endpoint such as a local Ollama. An optional
   **auto-submit** toggle presses Return after your pick (off by default; see `docs/ADR-010`). What Bark
   reads stays in memory and is never saved. Enable in **Settings ▸ Suggest**.
+- **Socratic discussion** (017, off by default) — press **F7** (configurable) in any text field and
+  Bark opens a short back-and-forth to refine what you want to say *before* it's written: the AI
+  asks clarifying questions (in a floating overlay, optionally spoken aloud by the on-device
+  system voice), you answer by voice — tap F7 to talk in push-to-talk, or just speak in
+  hands-free — and when the goal is clear it drafts the final text, shows it for review, and
+  **Confirm** inserts it at your cursor through the same safety rails as dictation (no Return
+  ever typed, secure fields refused, focus re-verified). **Recapture** re-reads the window
+  mid-session; the conversation stays in memory and is never saved. Engine: shares the Suggest
+  backend (on-device default, opt-in endpoint). Enable in **Settings ▸ Discuss**.
 
 ## On-device LLM rewrite (MLX) — built in by default
 
@@ -155,6 +164,7 @@ and the **honest limitations** of each control. Highlights, enforced in code:
 ```
 Bark (SwiftUI MenuBarExtra)
  ├─ DictationController ........ orchestrates the pipeline (state machine)
+ ├─ DiscussionController ....... Socratic pre-action dialogue → synthesized prompt (017)
  ├─ BarkEngines ................ OS adapters
  │   ├─ SpeechAnalyzerEngine ... Apple on-device STT (macOS 26)  [default]
  │   ├─ WhisperKit/ParakeetEngine  optional STT backends (build flags) + STTEngineFactory

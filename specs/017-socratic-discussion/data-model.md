@@ -39,7 +39,7 @@ Illegal (state, event) pairs are ignored (no-ops), matching the repo's state-mac
 | `thinking` | engine generating (opening question, a reply, or a retry) | **no** |
 | `presenting` | reply visible; TTS may be playing | **no** |
 | `awaitingUser` | user's turn: VAD armed, or waiting for PTT hold | yes |
-| `listening` | user speaking (PTT held / VAD speech started) | yes |
+| `listening` | user speaking (PTT turn open / VAD speech started) | yes |
 | `transcribing` | STT finalizing the turn | no |
 | `turnFailed` | engine reply failed; overlay offers Retry / Done / Cancel | no |
 | `synthesizing` | final-prompt generation | **no** |

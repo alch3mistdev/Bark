@@ -29,11 +29,11 @@ What the new automated tests prove (see plan/tasks for file names):
 Prereqs: Settings ▸ Discussion → enable; model downloaded (LLM modes working); pick mic mode.
 
 1. **Happy path (PTT)**: focus TextEdit, press F7 → overlay opens with a context-grounded
-   opening question. Hold fn, answer, release; repeat 2–3 turns. Press Done → preview →
-   Confirm → the prompt lands at the TextEdit cursor. Expected: no Return typed, clipboard
-   restored.
+   opening question. Tap F7 to talk, answer, tap F7 to finish; repeat 2–3 turns. Press Done
+   (or D) → preview → Confirm (⏎) → the prompt lands at the TextEdit cursor. Expected: no
+   Return typed into the app, clipboard restored.
 2. **Hands-free + TTS**: enable both. Run a session near speakers — the transcript must never
-   contain the AI's spoken words (half-duplex). Tap fn during speech → playback stops, your
+   contain the AI's spoken words (half-duplex). Tap F7 during speech → playback stops, your
    turn opens.
 3. **Readiness flow**: converge quickly ("I want X, constraint Y") until the AI asks to draft;
    answer "yes" → synthesis without touching Done.

@@ -144,3 +144,33 @@ delay is added (SC-004). `SpeakerEnrollmentController` drives a guided 5-phrase 
 utterances bypass the gate (fail-open by design); starting thresholds (0.40/0.50/0.62) are calibrated
 on real captures before release. See `specs/011-voice-fingerprinting/` for the spec, plan, research,
 and contracts.
+
+## ADR-011 — Socratic discussion (pre-action prompt refinement)
+
+**Decision.** Add an opt-in, hotkey-driven (default F7) multi-turn dialogue phase before text is
+produced: the user and the LLM refine a goal by voice (overlay text + optional on-device
+`AVSpeechSynthesizer` speech), grounded in a 015-style window capture, and the engine then
+synthesizes one final prompt that is previewed and injected through the existing safe-injection
+path. New `BarkCore` seams: `DialogueEngine` (message-array chat, conformers `MLXTextCleaner` and
+`OpenAICompatClient`), `SpeechSynthesizing` (TTS), and the pure `DiscussionSession` machine.
+Control flow never rides free text: replies carry a parsed `{"reply","ready"}` contract whose
+malformed degrade is `ready=false`.
+**Why.** Dictation turns speech into text; 015 answers what's on screen; neither helps the user
+*decide what to say*. A short Socratic loop before generation improves the final prompt where it
+matters (coding agents, email, docs) while reusing every hard primitive Bark already has.
+**Privacy/safety posture.** Transcript + capture are memory-only, wiped on session end, never in
+history (stronger than 015's empty-transcript records: nothing is recorded). External-endpoint use
+reuses the ADR-010 opt-in but the Discuss pane warns that a *whole conversation* is transmitted
+per turn. The mic is hard-leased: `DictationController.micLeaseHeld` makes both dictation start
+paths refuse while a session runs (advisory phase reads were racy), and hands-free is suspended
+and resumed around the session. Half-duplex is an invariant, not a hope: audio may start only in
+`awaitingUser`/`listening`, and leaving `presenting` requires `speak()` to have returned — tested
+with a gated TTS fake (SC-002). No auto-submit exists on this path; `ReturnKeySynthesizing` is not
+wired. The hotkey collision guard extends to 4-way.
+**Consequence.** `Settings` grows four tolerant-decoded fields; the settings window gains a 9th
+tab. The in-session turn key is the discussion hotkey itself (tap-to-talk toggle; tap skips TTS) —
+a refinement over the spec's original fn-hold idea, avoiding cross-controller event interception.
+~25 new tests (session machine, prompt fencing, parser, flow, TTS gating, recapture). Residuals:
+the readiness contract depends on model JSON discipline (degrade: Done button always works);
+per-turn stateless `ChatSession` rebuild trades prefill cost for recapture simplicity and
+testability. See `specs/017-socratic-discussion/`.

@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-13
 
-**Status**: Draft
+**Status**: Implemented (2026-09-13)
 
 **Input**: User description: "Add an interactive, pre-action discussion phase before finalizing a
 prompt: a real-time back-and-forth dialogue (text overlay, optional spoken voice) between the user
@@ -56,8 +56,8 @@ and nothing was typed into any other app.
 1. **Given** a focused text field and the feature enabled, **When** the user presses F7, **Then**
    the overlay opens showing an AI opening question that references the captured window content
    (or a visible "no context" indicator if capture failed, with the discussion still usable).
-2. **Given** an open session in push-to-talk mode, **When** the user holds the dictation key,
-   speaks, and releases, **Then** the transcribed turn appears in the transcript and the AI's
+2. **Given** an open session in push-to-talk mode, **When** the user taps the discussion key,
+   speaks, and taps it again, **Then** the transcribed turn appears in the transcript and the AI's
    next question follows in the overlay (and is spoken aloud when TTS is enabled).
 3. **Given** an open session in hands-free mode, **When** the user speaks and pauses, **Then**
    the turn is taken without any key press, and the mic re-arms only after the AI's reply is
@@ -79,7 +79,7 @@ and nothing was typed into any other app.
 The user enables **Spoken replies** in Settings. During a session the AI's questions are read
 aloud by the on-device synthesizer while also shown in the overlay. The microphone is never
 armed while the synthesizer is speaking, so Bark never transcribes its own voice. Tapping the
-dictation key during playback skips the speech immediately and opens the user's turn.
+discussion key during playback skips the speech immediately and opens the user's turn.
 
 **Why this priority**: TTS is the "natural conversation" half of the request, but the feature is
 fully usable text-only; TTS must layer on without creating an audio feedback path.
@@ -91,7 +91,7 @@ Mac's speakers → no AI-spoken words ever appear in the user's transcript turns
 
 1. **Given** TTS enabled, **When** an AI reply is presented, **Then** the reply is spoken and the
    mic remains disarmed until playback completes.
-2. **Given** TTS playback in progress, **When** the user taps the dictation key, **Then**
+2. **Given** TTS playback in progress, **When** the user taps the discussion key, **Then**
    playback stops at once and the user's turn opens.
 3. **Given** the synthesizer fails, **When** an AI reply is presented, **Then** the session
    continues text-only with no user-facing error (failure logged).
@@ -129,8 +129,12 @@ lost, and if synthesis itself fails twice the transcript is offered for clipboar
   waits for the next key hold (PTT). No engine call.
 - User presses F7 while a session is already open: brings the overlay to front; no second session.
 - Dictation hotkey (fn) pressed for ordinary dictation while a discussion session is open: the
-  discussion owns the mic; in-session the dictation key *is* the turn key (PTT hold / TTS skip
-  tap), and ordinary dictation is unavailable until the session ends (the overlay states this).
+  discussion owns the mic (the lease makes dictation's start paths refuse), and ordinary
+  dictation is unavailable until the session ends. *Implementation refinement (2026-09-13):*
+  in-session the turn key is the **discussion hotkey itself** (F7 tap-to-talk toggle: tap to
+  open the turn, tap to close it; a tap during TTS skips the speech) — not the fn dictation
+  key, whose event routing is private to `DictationController` and would have required
+  invasive cross-controller coupling to intercept. One key drives the whole conversation.
 - Hands-free continuous dictation (F5) already running when F7 is pressed: hands-free is
   suspended for the session and resumes automatically when the session ends.
 - Secure field focused at session start: session refuses to start (same policy signals as
