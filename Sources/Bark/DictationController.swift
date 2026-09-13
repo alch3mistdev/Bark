@@ -312,6 +312,10 @@ public final class DictationController {
             guard let delay = self?.llmIdleUnloadAfter else { return }
             try? await Task.sleep(for: .seconds(delay))
             guard let self, !Task.isCancelled, self.llmStatus == .ready else { return }
+            // 017 (ADV-006): a discussion session shares this residency —
+            // unloading mid-conversation would strand every remaining turn on
+            // engineUnavailable. Defer while the lease is held.
+            guard !self.micLeaseHeld else { self.scheduleLLMIdleUnload(); return }
             self.llmStatus = .notLoaded
             await self.llmCleaner?.unload()
             BarkLog.cleanup.info("llm released after \(Int(delay), privacy: .public)s idle")
@@ -1198,9 +1202,16 @@ public final class DictationController {
     /// Continuous, VAD-gated loop: detect speech onset → capture the utterance →
     /// on silence, finalize → clean → inject → keep listening. Until toggled off.
     private func runHandsFree(_ engine: AudioCapturing) async {
+        // 017 (ADV-013): if a discussion took the mic (or we were cancelled)
+        // before this queued worker ran, opening the engine would orphan a
+        // hot mic that stopHandsFree() can no longer reach.
+        guard !Task.isCancelled, !micLeaseHeld, handsFreeActive else { return }
         let stream: AsyncStream<AudioFrames>
         do { stream = try engine.start() }
         catch { fail(Self.describe(error)); stopHandsFree(); return }
+        // Belt-and-braces: whatever path exits this loop, THIS engine stops —
+        // `handsFreeAudio` may already point at a successor (ADV-013).
+        defer { engine.stop() }
 
         var vad = VoiceActivityDetector(config: VADConfig(sensitivity: settings.settings.vadSensitivity))
         var capturing = false

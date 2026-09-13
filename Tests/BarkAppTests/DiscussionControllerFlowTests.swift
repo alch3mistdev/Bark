@@ -134,10 +134,23 @@ final class DiscussionControllerFlowTests: XCTestCase {
     // MARK: - Happy loop (hands-free VAD)
 
     func testVADTurnHandsFree() async {
-        // 3 loud frames (onset at 2) + 10 quiet (hangover 8 → speechEnded).
-        let h = make(micMode: .handsFree, audioFactory: {
-            ScriptedAudioCapture(rmsLevels: [0.05, 0.05, 0.05] + Array(repeating: 0.001, count: 10))
-        })
+        // 3 loud frames (onset at 2) + 10 quiet (hangover 8 → speechEnded) on
+        // the FIRST armed engine; every re-arm gets silence so the session
+        // settles in awaitingUser instead of auto-running further turns.
+        final class OneUtteranceFactory: @unchecked Sendable {
+            private let lock = NSLock()
+            private var first = true
+            func make() -> AudioCapturing {
+                lock.lock(); defer { lock.unlock() }
+                let levels: [Float] = first
+                    ? [0.05, 0.05, 0.05] + Array(repeating: 0.001, count: 10)
+                    : Array(repeating: 0.001, count: 30)
+                first = false
+                return ScriptedAudioCapture(rmsLevels: levels)
+            }
+        }
+        let factory = OneUtteranceFactory()
+        let h = make(micMode: .handsFree, audioFactory: { factory.make() })
         let c = h.controller
 
         c.begin()

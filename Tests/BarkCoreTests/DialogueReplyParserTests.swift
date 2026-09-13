@@ -53,6 +53,37 @@ final class DialogueReplyParserTests: XCTestCase {
         XCTAssertTrue(r.text.contains("question"))
     }
 
+    // ADV-009 regressions: reasoning spans + object choice + trigger finality.
+
+    func testThinkSpanQuotingTheTriggerLiteralDoesNotFire() {
+        // The system prompt teaches the trigger literal; a reasoning model
+        // restating it while deliberating must not end the discussion.
+        let raw = #"<think>rules say emit {"reply": "", "ready": true} when confirmed — not yet</think>{"reply": "Which audience?", "ready": false}"#
+        let r = DialogueReplyParser.parse(raw)
+        XCTAssertEqual(r.text, "Which audience?")
+        XCTAssertFalse(r.isSynthesisTrigger)
+    }
+
+    func testLastDecodableObjectWinsOverEarlierOnes() {
+        let raw = #"{"reply": "draft A", "ready": false} …reconsidering… {"reply": "Which tone?", "ready": false}"#
+        XCTAssertEqual(DialogueReplyParser.parse(raw).text, "Which tone?")
+    }
+
+    func testTriggerObjectMustBeFinalContent() {
+        // A trigger-shaped object followed by more prose is the model talking,
+        // not answering — demote to not-ready.
+        let raw = #"{"reply": "", "ready": true} …but actually let me ask one more thing."#
+        let r = DialogueReplyParser.parse(raw)
+        XCTAssertFalse(r.isReadyToSynthesize)
+        // The trigger as the actual final content still fires.
+        XCTAssertTrue(DialogueReplyParser.parse(#"Okay. {"reply": "", "ready": true}"#).isSynthesisTrigger)
+    }
+
+    func testUnterminatedThinkBlockFallsBackSafely() {
+        let r = DialogueReplyParser.parse(#"<think>endless deliberation {"reply": "", "ready": true}"#)
+        XCTAssertFalse(r.isReadyToSynthesize)
+    }
+
     func testMalformedOutputCanNeverTriggerSynthesis() {
         // FR-003 fail-safe: even output that *claims* readiness in prose or in
         // broken JSON must not become a trigger.

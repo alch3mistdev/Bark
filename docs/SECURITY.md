@@ -182,7 +182,11 @@ code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the nex
 - ☑ **Mic exclusivity is a hard interlock**: `DictationController.micLeaseHeld` makes both dictation
   start paths refuse while a session runs; hands-free is suspended and auto-resumed. **Half-duplex is
   tested**: audio capture can start only in mic-legal states, and TTS playback must complete before
-  the mic re-arms (SC-002, gated-fake test).
+  the mic re-arms (SC-002, gated-fake test). Post-adversarial hardening: mic arming is single-owner
+  (generation-tokened VAD loops; a stale loop stops its own engine), the capture engine is stopped at
+  the device level before transcription/generation run, PTT turns are latched synchronously against
+  double-taps, and every exit from the speaking state silences TTS and invalidates its pending
+  completion (ADV-001…004, ADV-010…013).
 - ☑ **No Return, no auto-submit**: `ReturnKeySynthesizing` is not wired into the discussion path at
   all; the sole handoff is a previewed, user-confirmed insert through the sanitizer/router.
 - ☑ **TTS is on-device** (`AVSpeechSynthesizer`); its failure degrades to text-only silently.
@@ -193,6 +197,13 @@ code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the nex
   the guaranteed path). No safety property depends on the model complying.
 - **Residual (L-20 — spoken content is audible):** TTS reads AI questions aloud; in shared spaces that
   may disclose the discussion's topic. Off by default; the overlay always shows the same text.
+- **Residual (L-21 — speaker gate not applied, ADV-007):** the 011 voice gate does not filter
+  discussion turns — in hands-free mode any audible voice can take a turn and (with the external
+  backend) its words are transmitted per turn without preview. The Discuss pane states this
+  explicitly; gate integration is future work.
+- **Residual (L-22 — second STT residency):** the discussion runs its own `STTEngine` instance
+  (mic-lease-serialized against dictation's); with a downloaded backend that is a second model
+  residency, loaded at first session and held until quit.
 
 ## Permissions — least privilege  (`Resources/Bark.entitlements`, `PermissionsCoordinator`)
 - ☑ Only the microphone device entitlement. Accessibility + Input Monitoring are user-granted via TCC,

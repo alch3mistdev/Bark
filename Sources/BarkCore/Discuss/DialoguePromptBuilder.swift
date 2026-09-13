@@ -98,7 +98,10 @@ public enum DialoguePromptBuilder {
     /// Strip every fence-tag literal (this feature's and `SuggestionPrompt`'s)
     /// to a fixed point, so no speech or screen content can forge or unbalance
     /// a data block (same reassembly defense as `SuggestionPrompt.neutralize`).
-    static func neutralize(_ s: String) -> String {
+    /// Public because the controller also neutralizes *assistant* replies
+    /// before they enter the transcript: assistant turns are replayed unfenced,
+    /// so a model echo of a fence tag must never survive into history (ADV-008).
+    public static func neutralize(_ s: String) -> String {
         let tags = [
             userTurnOpenTag, userTurnCloseTag,
             SuggestionPrompt.contextOpenTag, SuggestionPrompt.contextCloseTag,

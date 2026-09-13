@@ -36,7 +36,8 @@ struct DiscussionPane: View {
                 Text(discussion.micMode == .ptt
                      ? "Tap the discussion hotkey to start talking, tap again to finish."
                      : "Just speak when it's your turn; a pause ends the turn. Uses the hands-free "
-                       + "sensitivity from Settings › Hotkey. The speaker gate applies if enrolled.")
+                       + "sensitivity from Settings › Hotkey. Note: the speaker gate does NOT "
+                       + "filter discussion turns yet — anyone audible can answer.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

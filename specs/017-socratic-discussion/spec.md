@@ -26,7 +26,8 @@ cursor of the focused application — any app, CLI or otherwise."
   opt-in OpenAI-compatible endpoint with a privacy warning (strengthened: a discussion transcript
   reveals multi-turn intent, more sensitive than a one-shot capture).
 - Q: Mic model for the user's turns? → A: Both, user picks in Settings — push-to-talk per turn, or
-  continuous hands-free VAD (speaker-gate compatible). Half-duplex either way: the mic is
+  continuous hands-free VAD (speaker gate: not yet applied — see FR-005 limitation). Half-duplex
+  either way: the mic is
   hard-disarmed while TTS plays and while the engine is thinking.
 - Q: Session end + handoff? → A: Preview + confirm. Synthesized prompt is shown in the overlay;
   user Confirms (inject via the existing safe-injection path), Resumes the discussion, or Cancels.
@@ -162,9 +163,11 @@ lost, and if synthesis itself fails twice the transcript is offered for clipboar
   (`isReadyToSynthesize`) distinct from the reply text; free text MUST never drive control flow.
 - **FR-004**: The user MUST be able to force synthesis (**Done**), continue past a readiness
   signal, **Resume** from preview, **Recapture** context, and **Cancel** at any point.
-- **FR-005**: Mic model MUST be selectable in Settings: push-to-talk per turn, or hands-free VAD
-  (speaker-gate compatible). In both, the mic MUST be hard-disarmed while TTS plays and while
-  the engine is generating (half-duplex; no self-transcription).
+- **FR-005**: Mic model MUST be selectable in Settings: push-to-talk per turn, or hands-free VAD.
+  In both, the mic MUST be hard-disarmed while TTS plays and while the engine is generating
+  (half-duplex; no self-transcription). *Documented limitation (adversarial review ADV-007):*
+  the 011 speaker gate does not yet filter discussion turns — any audible voice can take a
+  turn; the settings pane says so explicitly. Gate integration is future work.
 - **FR-006**: TTS MUST be an optional, on-device, additive output (`AVSpeechSynthesizer` seam);
   its failure MUST degrade the session to text-only without data loss. A key tap MUST skip
   playback and open the user's turn.

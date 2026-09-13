@@ -50,6 +50,7 @@ public final class DiscussionController {
     private let replyDeadline: Double
     private let synthesisDeadline: Double
     private let sttFinalizeDeadline: Double
+    private let captureDeadline: Double
     private let settleDelay: Duration
 
     private var capturedTarget: InjectionTarget?
@@ -58,10 +59,25 @@ public final class DiscussionController {
     /// Invalidates every in-flight task of a torn-down session (015's
     /// `passToken` pattern — callees don't all honor cancellation).
     private var sessionToken = 0
+    /// Single-owner mic arming (ADV-001): every arm bumps this; a VAD loop
+    /// whose generation is stale must stop its engine and exit — otherwise a
+    /// synchronous present→arm chain leaves the OLD loop alive alongside the
+    /// new one, one more per turn.
+    private var micGeneration = 0
+    /// Guards `presenting` exits (ADV-003): a stale speak-completion may only
+    /// dispatch `presentationFinished` for its own presentation.
+    private var presentGeneration = 0
+    /// Set synchronously on the PTT key tap (ADV-002): the state machine only
+    /// flips to `listening` after an await, so state alone can't stop a
+    /// double-tap from spawning two capture engines and orphaning one.
+    private var pttTurnActive = false
     private var flowTask: Task<Void, Never>?
     private var turnTask: Task<Void, Never>?
     private var speakTask: Task<Void, Never>?
     private var injectTask: Task<Void, Never>?
+    /// Pending fire-and-forget `stt.cancel()` (ADV-012): awaited before the
+    /// next `beginStream` so a delayed cleanup can't kill the new turn.
+    private var sttCleanup: Task<Void, Never>?
 
     // PTT turn plumbing (audio + result consumer live across down/up).
     private var pttAudio: AudioCapturing?
@@ -91,6 +107,7 @@ public final class DiscussionController {
         replyDeadline: Double = 20,
         synthesisDeadline: Double = 30,
         sttFinalizeDeadline: Double = 3,
+        captureDeadline: Double = 15,
         settleDelay: Duration = .milliseconds(120)
     ) {
         self.settings = settings
@@ -110,6 +127,7 @@ public final class DiscussionController {
         self.replyDeadline = replyDeadline
         self.synthesisDeadline = synthesisDeadline
         self.sttFinalizeDeadline = sttFinalizeDeadline
+        self.captureDeadline = captureDeadline
         self.settleDelay = settleDelay
     }
 
@@ -199,6 +217,11 @@ public final class DiscussionController {
         switch session.state {
         case .idle:
             begin()
+        case .capturing:
+            // Capture/prepare can stall on a hung app or a model load; the
+            // panel isn't key yet so Esc can't reach us — F7 is the escape
+            // hatch (ADV-005).
+            cancel()
         case .presenting:
             skipSpeech()
         case .awaitingUser where micMode == .ptt:
@@ -242,11 +265,15 @@ public final class DiscussionController {
     }
 
     private func runCaptureAndOpen(target: InjectionTarget, token: Int) async {
-        // Warm STT while capture runs so the first turn starts instantly.
-        try? await stt.prepare(locale: settings.settings.localeID)
-        guard token == sessionToken else { return }
+        // STT prepare + capture, under one deadline: either can stall (model
+        // download, AX IPC against a hung app) and `capturing` would otherwise
+        // hold the mic lease with no automatic way out (ADV-005).
         do {
-            let captured = try await capture.capture(target: target)
+            let locale = settings.settings.localeID
+            let captured = try await raced(seconds: captureDeadline) { [stt, capture] in
+                try? await stt.prepare(locale: locale)
+                return try await capture.capture(target: target)
+            }
             guard token == sessionToken, session.state == .capturing else { return }
             context = captured
             session.handle(.captureSucceeded(hasContext: true))
@@ -254,6 +281,12 @@ public final class DiscussionController {
             guard token == sessionToken, session.state == .capturing else { return }
             session.handle(.captureRefusedSecure)   // FR-013
             lastError = "Bark won't run a discussion over a password field."
+            teardown()
+            return
+        } catch DialogueError.deadlineExceeded {
+            guard token == sessionToken, session.state == .capturing else { return }
+            session.handle(.cancelRequested)
+            lastError = "Couldn't read the window or prepare speech in time — session cancelled."
             teardown()
             return
         } catch {
@@ -268,13 +301,16 @@ public final class DiscussionController {
     /// Wipes everything a session held (FR-010) and returns mic ownership.
     private func teardown() {
         sessionToken += 1
+        micGeneration += 1
+        presentGeneration += 1
         flowTask?.cancel(); flowTask = nil
         turnTask?.cancel(); turnTask = nil
         speakTask?.cancel(); speakTask = nil
         injectTask?.cancel(); injectTask = nil
         stopPTTAudio()
+        pttTurnActive = false
         synthesizer?.stop()
-        Task { await stt.cancel() }
+        scheduleSTTCleanup()
         context = nil
         capturedTarget = nil
         finalSegments = []; volatileTail = ""
@@ -291,6 +327,7 @@ public final class DiscussionController {
 
     public func cancel() {
         guard session.state != .idle else { return }
+        stopSpeakingIfNeeded()
         session.handle(.cancelRequested)
         publish()
         teardown()
@@ -298,28 +335,34 @@ public final class DiscussionController {
 
     public func done() {
         stopListeningIfNeeded()
+        stopSpeakingIfNeeded()   // leaving `presenting` must silence TTS (ADV-003)
         let token = sessionToken
+        let before = session.state
         session.handle(.doneRequested)
         publish()
-        if session.state == .synthesizing {
+        // Spawn only on an actual transition — a no-op event (e.g. D pressed
+        // while already synthesizing) must not double the engine call (ADV-014).
+        if session.state == .synthesizing, before != .synthesizing {
             turnTask = Task { [weak self] in await self?.runSynthesis(token: token) }
         }
     }
 
     public func retryTurn() {
         let token = sessionToken
+        let before = session.state
         session.handle(.retryTurn)
         publish()
-        if session.state == .thinking {
+        if session.state == .thinking, before != .thinking {
             turnTask = Task { [weak self] in await self?.engineTurn(token: token) }
         }
     }
 
     public func retrySynthesis() {
         let token = sessionToken
+        let before = session.state
         session.handle(.retrySynthesis)
         publish()
-        if session.state == .synthesizing {
+        if session.state == .synthesizing, before != .synthesizing {
             turnTask = Task { [weak self] in await self?.runSynthesis(token: token) }
         }
     }
@@ -339,7 +382,9 @@ public final class DiscussionController {
     }
 
     /// Re-run capture against the session target, replacing the snapshot on
-    /// success and keeping the previous one on failure (US3).
+    /// success and keeping the previous one on failure (US3). A secure-field
+    /// refusal is surfaced as such — the same policy begin() enforces — not
+    /// blurred into a generic re-read failure (ADV-015).
     public func recapture() {
         guard let target = capturedTarget,
               session.state == .awaitingUser || session.state == .presenting || session.state == .turnFailed
@@ -347,10 +392,14 @@ public final class DiscussionController {
         let token = sessionToken
         Task { [weak self] in
             guard let self else { return }
-            if let fresh = try? await self.capture.capture(target: target) {
+            do {
+                let fresh = try await self.capture.capture(target: target)
                 guard token == self.sessionToken else { return }
                 self.context = fresh
-            } else {
+            } catch ContextCaptureError.secureField {
+                guard token == self.sessionToken else { return }
+                self.lastError = "The window now has a secure field focused — Bark won't re-read it; keeping the previous context."
+            } catch {
                 guard token == self.sessionToken else { return }
                 self.lastError = "Couldn't re-read the window — keeping the previous context."
             }
@@ -419,7 +468,13 @@ public final class DiscussionController {
                 try await engine.reply(system: system, turns: turns)
             }
             guard token == sessionToken, session.state == .thinking else { return }
-            let reply = DialogueReplyParser.parse(raw)
+            let parsed = DialogueReplyParser.parse(raw)
+            // Assistant turns are replayed unfenced in later prompts, so a
+            // model-echoed fence tag must be neutralized BEFORE it enters the
+            // transcript — otherwise one echo becomes a persistent
+            // assistant-role injection foothold (ADV-008).
+            let reply = DialogueReply(text: DialoguePromptBuilder.neutralize(parsed.text),
+                                      isReadyToSynthesize: parsed.isReadyToSynthesize)
             session.handle(.replyArrived(reply))
             publish()
             if session.state == .synthesizing {
@@ -437,12 +492,18 @@ public final class DiscussionController {
 
     /// Show the reply; speak it when TTS is on. `presentationFinished` fires
     /// only when speech is done (or immediately without TTS) — that IS the
-    /// half-duplex gate.
+    /// half-duplex gate. Each presentation gets a generation so a stale speak
+    /// completion (released by a later stop() or a follow-up speak()) can
+    /// never finish a DIFFERENT presentation (ADV-003 path B).
     private func present(_ reply: DialogueReply, token: Int) {
         if ttsEnabled, let synthesizer {
+            presentGeneration += 1
+            let generation = presentGeneration
             speakTask = Task { [weak self] in
                 await synthesizer.speak(reply.text)
-                guard let self, token == self.sessionToken else { return }
+                guard let self, token == self.sessionToken,
+                      generation == self.presentGeneration else { return }
+                self.speakTask = nil
                 self.finishPresentation()
             }
         } else {
@@ -458,12 +519,25 @@ public final class DiscussionController {
     }
 
     /// Key tap during TTS playback: stop speech now and open the turn (US2).
+    /// `speakTask != nil` (not the current toggle value) decides whether audio
+    /// might be playing — toggling TTS off mid-playback must still stop it
+    /// (ADV-003 path C).
     private func skipSpeech() {
-        if ttsEnabled, synthesizer != nil {
+        if speakTask != nil {
             synthesizer?.stop()   // the pending speak() returns → finishPresentation
         } else {
             finishPresentation()
         }
+    }
+
+    /// Silence any exit from `presenting` that isn't `presentationFinished`:
+    /// stop playback and invalidate the pending speak-completion so it cannot
+    /// release the mic gate for a state we've already left (ADV-003).
+    private func stopSpeakingIfNeeded() {
+        guard speakTask != nil else { return }
+        presentGeneration += 1
+        synthesizer?.stop()
+        speakTask = nil
     }
 
     private func runSynthesis(token: Int) async {
@@ -519,18 +593,26 @@ public final class DiscussionController {
 
     // MARK: - Turn capture (mic)
 
+    /// Single arm point (ADV-001): bumps the mic generation and replaces the
+    /// turn loop, so at most ONE loop is ever live — a stale loop notices its
+    /// generation and stops its own engine.
     private func armMicIfNeeded() {
         guard session.state == .awaitingUser else { return }
         guard micMode == .handsFree else { return }   // PTT waits for the key
+        turnTask?.cancel()
+        micGeneration += 1
         let token = sessionToken
-        turnTask = Task { [weak self] in await self?.runVADTurn(token: token) }
+        let generation = micGeneration
+        turnTask = Task { [weak self] in await self?.runVADTurn(token: token, generation: generation) }
     }
 
     private func stopListeningIfNeeded() {
         guard session.state == .listening || session.state == .awaitingUser else { return }
+        micGeneration += 1   // any live VAD loop is now stale
         turnTask?.cancel(); turnTask = nil
         stopPTTAudio()
-        Task { await stt.cancel() }
+        pttTurnActive = false
+        scheduleSTTCleanup()
         finalSegments = []; volatileTail = ""
         if session.state == .listening {
             // Unwind the open turn so Done is legal from mid-listen: an
@@ -540,9 +622,24 @@ public final class DiscussionController {
         }
     }
 
+    /// Fire `stt.cancel()` without blocking the caller, but keep the handle so
+    /// the next `beginStream` can await it — an unordered late cancel could
+    /// otherwise tear down the replacement turn's stream (ADV-012).
+    private func scheduleSTTCleanup() {
+        let previous = sttCleanup
+        sttCleanup = Task { [stt] in
+            await previous?.value
+            await stt.cancel()
+        }
+    }
+
     /// One VAD-gated utterance per arm cycle: mirror of `runHandsFree`, but
-    /// the product is a transcript event — no cleanup, no injection.
-    private func runVADTurn(token: Int) async {
+    /// the product is a transcript event — no cleanup, no injection. The
+    /// audio engine is stopped BEFORE transcription/generation run, so the
+    /// mic is closed (at the device level, not just by state) outside the
+    /// mic-legal states (ADV-004); the turn's aftermath is dispatched from
+    /// outside the loop and this task never survives past it (ADV-001).
+    private func runVADTurn(token: Int, generation: Int) async {
         let engine = audioFactory()
         let stream: AsyncStream<AudioFrames>
         do { stream = try engine.start() }
@@ -551,7 +648,6 @@ public final class DiscussionController {
             lastError = "Couldn't open the microphone."
             return
         }
-        defer { engine.stop() }
 
         var vad = VoiceActivityDetector(config: VADConfig(sensitivity: settings.settings.vadSensitivity))
         var capturing = false
@@ -561,14 +657,18 @@ public final class DiscussionController {
         let maxUtteranceFrames = 300   // ~30 s cap
 
         for await frames in stream {
-            guard token == sessionToken, !Task.isCancelled else { return }
+            guard token == sessionToken, generation == micGeneration, !Task.isCancelled else {
+                engine.stop()
+                return
+            }
             let event = vad.process(frames)
 
             if !capturing {
                 preroll.append(frames)
                 if preroll.count > prerollMax { preroll.removeFirst() }
                 guard event == .speechStarted else { continue }
-                guard await beginSTTTurn(token: token) else { return }
+                guard await beginSTTTurn(token: token) else { engine.stop(); return }
+                guard token == sessionToken, generation == micGeneration else { engine.stop(); return }
                 for f in preroll { await stt.feed(f) }
                 preroll.removeAll()
                 capturing = true
@@ -577,33 +677,41 @@ public final class DiscussionController {
                 await stt.feed(frames)
                 capturedFrames += 1
                 guard event == .speechEnded || capturedFrames >= maxUtteranceFrames else { continue }
-                await endSTTTurn(token: token)
-                // Non-empty → thinking (engine turn runs); empty → keep this
-                // same stream open and listen for the next utterance.
-                guard token == sessionToken else { return }
-                if session.state == .awaitingUser {
-                    capturing = false
-                    vad.reset()
-                    continue
-                }
-                return
+                break   // utterance complete — close the mic before anything else
             }
         }
+        engine.stop()
+        guard capturing, token == sessionToken, generation == micGeneration else { return }
+        await finishTurn(token: token)
+        // finishTurn re-arms (fresh loop, fresh generation) after an empty
+        // turn or dispatches the engine turn; either way THIS loop is done.
     }
 
     // PTT: the discussion key toggles the turn open/closed.
 
     private func pttDown() {
         guard session.state == .awaitingUser else { return }
+        // Synchronous latch (ADV-002): the state flips to `listening` only
+        // after beginStream's await, so a double-tap would otherwise spawn a
+        // second engine and orphan the first — a permanently hot mic.
+        guard !pttTurnActive else { return }
+        pttTurnActive = true
         let token = sessionToken
         turnTask = Task { [weak self] in
             guard let self else { return }
-            guard await self.beginSTTTurn(token: token) else { return }
+            guard await self.beginSTTTurn(token: token) else {
+                if token == self.sessionToken { self.pttTurnActive = false }
+                return
+            }
+            guard token == self.sessionToken, self.session.state == .listening else {
+                if token == self.sessionToken { self.pttTurnActive = false }
+                return
+            }
             let engine = self.audioFactory()
             self.pttAudio = engine
             guard let stream = try? engine.start() else {
                 self.lastError = "Couldn't open the microphone."
-                await self.endSTTTurn(token: token)
+                await self.endPTTTurn(token: token)
                 return
             }
             self.pttFeedTask = Task { [weak self] in
@@ -616,13 +724,15 @@ public final class DiscussionController {
     }
 
     private func pttUp() {
-        guard session.state == .listening else { return }
+        guard session.state == .listening, pttTurnActive else { return }
         let token = sessionToken
-        turnTask = Task { [weak self] in
-            guard let self else { return }
-            self.stopPTTAudio()
-            await self.endSTTTurn(token: token)
-        }
+        turnTask = Task { [weak self] in await self?.endPTTTurn(token: token) }
+    }
+
+    private func endPTTTurn(token: Int) async {
+        stopPTTAudio()
+        await finishTurn(token: token)
+        if token == sessionToken { pttTurnActive = false }
     }
 
     private func stopPTTAudio() {
@@ -633,10 +743,15 @@ public final class DiscussionController {
     /// Starts an STT stream + consumer and moves the session to `listening`.
     private func beginSTTTurn(token: Int) async -> Bool {
         guard token == sessionToken, session.state == .awaitingUser else { return false }
+        await sttCleanup?.value   // a late cancel must not kill this stream (ADV-012)
+        guard token == sessionToken, session.state == .awaitingUser else { return false }
         finalSegments = []; volatileTail = ""
         do {
             let results = try await stt.beginStream()
-            guard token == sessionToken else { await stt.cancel(); return false }
+            guard token == sessionToken, session.state == .awaitingUser else {
+                scheduleSTTCleanup()
+                return false
+            }
             session.handle(.userTurnBegan)
             publish()
             sttConsumer = Task { @MainActor [weak self] in
@@ -660,13 +775,18 @@ public final class DiscussionController {
         }
     }
 
-    /// Finalizes the STT stream and dispatches the turn's transcript.
-    private func endSTTTurn(token: Int) async {
+    /// Finalizes the STT stream, dispatches the turn's transcript, and drives
+    /// the aftermath: engine turn on a non-empty turn, re-arm on an empty one.
+    private func finishTurn(token: Int) async {
         guard token == sessionToken, session.state == .listening else { return }
         session.handle(.userTurnEnded)
         publish()
+        // Unstructured deadline ON PURPOSE (ADV-011): a wedged SpeechAnalyzer
+        // finalize ignores cancellation, and a structured race would join the
+        // wedged child and freeze this turn forever — the exact failure
+        // 0f9a9a3 fixed for dictation. Accepting the leaked task is the fix.
         do {
-            try await raced(seconds: sttFinalizeDeadline) { [stt] in try await stt.finishStream() }
+            try await withThrowingDeadline(seconds: sttFinalizeDeadline) { [stt] in try await stt.finishStream() }
         } catch {
             await stt.cancel()
         }
@@ -680,9 +800,9 @@ public final class DiscussionController {
         publish()
         if session.state == .thinking {
             await engineTurn(token: token)
+        } else if session.state == .awaitingUser {
+            armMicIfNeeded()   // empty turn — fresh loop in VAD mode; PTT waits for the key
         }
-        // Empty turn: state is back to awaitingUser. In VAD mode the running
-        // loop keeps listening; in PTT mode the next key tap opens a turn.
     }
 
     // MARK: - Injection handoff (Confirm)
