@@ -24,12 +24,41 @@ public final class AVSpeechSynthesizerEngine: NSObject, SpeechSynthesizing, AVSp
         synthesizer.delegate = self
     }
 
-    public func speak(_ text: String) async {
+    /// Installed voices, mapped to the pure `VoiceOption` the picker and the
+    /// selection policy work with.
+    public var availableVoices: [VoiceOption] {
+        AVSpeechSynthesisVoice.speechVoices().map { voice in
+            VoiceOption(identifier: voice.identifier,
+                        name: voice.name,
+                        language: voice.language,
+                        tier: Self.tier(of: voice.quality))
+        }
+    }
+
+    static func tier(of quality: AVSpeechSynthesisVoiceQuality) -> VoiceTier {
+        switch quality {
+        case .premium: return .premium
+        case .enhanced: return .enhanced
+        default: return .basic
+        }
+    }
+
+    public func speak(_ text: String, voice: SpeechVoiceConfig?) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         // One utterance at a time by contract; a straggler is released first.
         releasePending(matching: nil)
         let utterance = AVSpeechUtterance(string: trimmed)
+        // An unknown identifier yields nil — leave the platform default rather
+        // than failing, so an uninstalled voice degrades instead of silencing.
+        if let id = voice?.voiceIdentifier, !id.isEmpty,
+           let selected = AVSpeechSynthesisVoice(identifier: id) {
+            utterance.voice = selected
+        }
+        if let rate = voice?.rate {
+            utterance.rate = min(max(rate, AVSpeechUtteranceMinimumSpeechRate),
+                                 AVSpeechUtteranceMaximumSpeechRate)
+        }
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             lock.lock()
             let epoch = stopEpoch

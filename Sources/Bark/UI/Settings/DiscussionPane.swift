@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import BarkCore
 import BarkEngines
 
@@ -44,6 +45,36 @@ struct DiscussionPane: View {
             Section("Spoken replies") {
                 Toggle("Read the AI's questions aloud", isOn: $discussion.ttsEnabled)
                     .disabled(!discussion.enabled)
+
+                Picker("Voice", selection: $discussion.voiceID) {
+                    Text(automaticLabel).tag("")
+                    ForEach(discussion.voiceOptions) { voice in
+                        Text(voiceLabel(voice)).tag(voice.identifier)
+                    }
+                }
+                .disabled(!discussion.enabled || !discussion.ttsEnabled)
+
+                HStack {
+                    Text("Rate")
+                    Slider(value: $discussion.speechRate, in: 0.3...0.7)
+                    Button("Preview") { discussion.previewVoice() }
+                }
+                .disabled(!discussion.enabled || !discussion.ttsEnabled)
+
+                if discussion.shouldSuggestVoiceDownload {
+                    // The stock Mac state: only compact voices installed, which
+                    // is what makes Apple's synthesizer sound robotic.
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Only basic voices are installed, which is why speech sounds robotic. "
+                              + "Downloading an Enhanced or Premium voice (about 200 MB, one time) "
+                              + "is the single biggest quality improvement available.",
+                              systemImage: "arrow.down.circle")
+                            .font(.caption).foregroundStyle(.orange)
+                        Button("Open Spoken Content settings…") { openSpokenContentSettings() }
+                            .controlSize(.small)
+                    }
+                }
+
                 Text("Uses the on-device system voice — nothing leaves your Mac. The microphone is "
                      + "always closed while Bark speaks, so it never hears itself. Tap the hotkey to "
                      + "skip the speech.")
@@ -70,5 +101,25 @@ struct DiscussionPane: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// Names the voice auto-selection actually resolved to, so "Automatic"
+    /// isn't opaque about what you're hearing.
+    private var automaticLabel: String {
+        guard let resolved = discussion.resolvedVoice else { return "Automatic" }
+        return "Automatic (\(resolved.name) · \(resolved.tier.label))"
+    }
+
+    private func voiceLabel(_ voice: VoiceOption) -> String {
+        var label = "\(voice.name) · \(voice.tier.label)"
+        if voice.isNovelty { label += " · novelty" }
+        else if voice.isLegacyFormant { label += " · retro" }
+        return label
+    }
+
+    private func openSpokenContentSettings() {
+        guard let url = URL(string:
+            "x-apple.systempreferences:com.apple.preference.universalaccess?SpokenContent") else { return }
+        NSWorkspace.shared.open(url)
     }
 }

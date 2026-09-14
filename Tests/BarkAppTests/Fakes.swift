@@ -456,8 +456,16 @@ final class FakeSpeechSynthesizer: SpeechSynthesizing {
 
     var speaking: Bool { !continuations.isEmpty }
 
-    func speak(_ text: String) async {
+    private(set) var spokenVoices: [SpeechVoiceConfig?] = []
+    /// Voices the picker should offer; empty by default.
+    var voices: [VoiceOption] = []
+    nonisolated var availableVoices: [VoiceOption] {
+        MainActor.assumeIsolated { voices }
+    }
+
+    func speak(_ text: String, voice: SpeechVoiceConfig?) async {
         spoken.append(text)
+        spokenVoices.append(voice)
         guard gated else { return }
         await withCheckedContinuation { continuations.append($0) }
     }

@@ -177,6 +177,55 @@ public final class DiscussionController {
         set { settings.update { $0.discussionTTSEnabled = newValue } }
     }
 
+    /// "" = auto (best installed tier for the user's language).
+    public var voiceID: String {
+        get { settings.settings.discussionVoiceID }
+        set { settings.update { $0.discussionVoiceID = newValue } }
+    }
+
+    public var speechRate: Float {
+        get { settings.settings.discussionSpeechRate }
+        set { settings.update { $0.discussionSpeechRate = newValue } }
+    }
+
+    /// Voices offered in the picker, best tier first (novelty/Eloquence last).
+    public var voiceOptions: [VoiceOption] {
+        VoiceSelector.options(from: synthesizer?.availableVoices ?? [],
+                              language: settings.settings.localeID)
+    }
+
+    /// The voice that would actually speak right now — what the UI labels as
+    /// the resolved "Automatic" choice.
+    public var resolvedVoice: VoiceOption? {
+        VoiceSelector.best(from: synthesizer?.availableVoices ?? [],
+                           language: settings.settings.localeID,
+                           preferred: settings.settings.discussionVoiceID)
+    }
+
+    /// True when this Mac has NO Enhanced or Premium voice for the user's
+    /// language — the stock state, and the single biggest cause of "the TTS
+    /// sounds terrible". Drives the download hint.
+    public var shouldSuggestVoiceDownload: Bool {
+        !VoiceSelector.hasBetterTierAvailable(than: .basic,
+                                              from: synthesizer?.availableVoices ?? [],
+                                              language: settings.settings.localeID)
+    }
+
+    /// Speak a sample line so the user can audition a voice from Settings.
+    /// Refused while a reply is being spoken, so auditioning can never overlap
+    /// session speech (and so it can't disturb the half-duplex gate).
+    public func previewVoice() {
+        guard let synthesizer, speakTask == nil else { return }
+        let config = voiceConfig()
+        Task { await synthesizer.speak("Here's how this voice sounds. What are you trying to write?",
+                                       voice: config) }
+    }
+
+    private func voiceConfig() -> SpeechVoiceConfig {
+        SpeechVoiceConfig(voiceIdentifier: resolvedVoice?.identifier,
+                          rate: settings.settings.discussionSpeechRate)
+    }
+
     /// Local backend rides the existing LLM opt-in, same rule as 015.
     public var localEngineUsable: Bool {
         localEngine != nil && settings.settings.llmEnabled
@@ -499,8 +548,9 @@ public final class DiscussionController {
         if ttsEnabled, let synthesizer {
             presentGeneration += 1
             let generation = presentGeneration
+            let config = voiceConfig()
             speakTask = Task { [weak self] in
-                await synthesizer.speak(reply.text)
+                await synthesizer.speak(reply.text, voice: config)
                 guard let self, token == self.sessionToken,
                       generation == self.presentGeneration else { return }
                 self.speakTask = nil

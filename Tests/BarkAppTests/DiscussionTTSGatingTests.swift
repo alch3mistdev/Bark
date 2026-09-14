@@ -130,6 +130,58 @@ final class DiscussionTTSGatingTests: XCTestCase {
         c.cancel()
     }
 
+    func testResolvedVoiceAndRateReachTheSynthesizer() async {
+        // The 017 bug: no voice was ever set, so AVSpeechSynthesizer used the
+        // platform default (a compact voice). Prove the selection now travels.
+        let (c, synth, _) = make(micMode: .ptt, gatedTTS: false)
+        synth.voices = [
+            VoiceOption(identifier: "com.apple.speech.synthesis.voice.BadNews",
+                        name: "Bad News", language: "en-US", tier: .basic),
+            VoiceOption(identifier: "com.apple.voice.compact.en-US.Samantha",
+                        name: "Samantha", language: "en-US", tier: .basic),
+            VoiceOption(identifier: "com.apple.voice.premium.en-US.Ava",
+                        name: "Ava", language: "en-US", tier: .premium),
+        ]
+        c.speechRate = 0.55
+        XCTAssertEqual(c.resolvedVoice?.name, "Ava")        // best tier, not the novelty voice
+        XCTAssertFalse(c.shouldSuggestVoiceDownload)         // a Premium voice IS installed
+
+        c.begin()
+        await waitFor("spoke") { synth.spoken.count == 1 }
+        XCTAssertEqual(synth.spokenVoices.first??.voiceIdentifier,
+                       "com.apple.voice.premium.en-US.Ava")
+        XCTAssertEqual(synth.spokenVoices.first??.rate, 0.55)
+        c.cancel()
+    }
+
+    func testStockMacSuggestsAVoiceDownload() async {
+        let (c, synth, _) = make(micMode: .ptt, gatedTTS: false)
+        synth.voices = [
+            VoiceOption(identifier: "com.apple.voice.compact.en-US.Samantha",
+                        name: "Samantha", language: "en-US", tier: .basic),
+            VoiceOption(identifier: "com.apple.speech.synthesis.voice.Zarvox",
+                        name: "Zarvox", language: "en-US", tier: .basic),
+        ]
+        XCTAssertTrue(c.shouldSuggestVoiceDownload)
+        XCTAssertEqual(c.resolvedVoice?.name, "Samantha")
+    }
+
+    func testUserVoiceChoiceOverridesAutoSelection() async {
+        let (c, synth, _) = make(micMode: .ptt, gatedTTS: false)
+        synth.voices = [
+            VoiceOption(identifier: "com.apple.voice.premium.en-US.Ava",
+                        name: "Ava", language: "en-US", tier: .premium),
+            VoiceOption(identifier: "com.apple.speech.synthesis.voice.Zarvox",
+                        name: "Zarvox", language: "en-US", tier: .basic),
+        ]
+        c.voiceID = "com.apple.speech.synthesis.voice.Zarvox"
+        c.begin()
+        await waitFor("spoke") { synth.spoken.count == 1 }
+        XCTAssertEqual(synth.spokenVoices.first??.voiceIdentifier,
+                       "com.apple.speech.synthesis.voice.Zarvox")
+        c.cancel()
+    }
+
     func testTTSFailureDegradesToTextOnly() async {
         // Ungated fake = speak() returns immediately (a failed/very-short
         // synthesis). The session must proceed with no user-facing error.

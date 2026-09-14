@@ -104,6 +104,8 @@ public struct Settings: Codable, Sendable, Equatable {
     public var discussionHotkey: HotkeySetting
     public var discussionMicMode: DiscussionMicMode
     public var discussionTTSEnabled: Bool
+    public var discussionVoiceID: String        // "" = auto-pick the best installed tier
+    public var discussionSpeechRate: Float      // AVSpeechUtteranceDefaultSpeechRate == 0.5
 
     public init(
         selectedModeID: String = Mode.clean.id,
@@ -140,7 +142,9 @@ public struct Settings: Codable, Sendable, Equatable {
         // function key never collides with the fn-hold push-to-talk.
         discussionHotkey: HotkeySetting = HotkeySetting(kind: .keyToggle, keyCode: 98, modifierFlags: 0),
         discussionMicMode: DiscussionMicMode = .ptt,   // zero false triggers out of the box
-        discussionTTSEnabled: Bool = false
+        discussionTTSEnabled: Bool = false,
+        discussionVoiceID: String = "",   // auto: best installed tier, never a novelty voice
+        discussionSpeechRate: Float = 0.5
     ) {
         self.selectedModeID = selectedModeID
         self.customModes = customModes
@@ -172,6 +176,8 @@ public struct Settings: Codable, Sendable, Equatable {
         self.discussionHotkey = discussionHotkey
         self.discussionMicMode = discussionMicMode
         self.discussionTTSEnabled = discussionTTSEnabled
+        self.discussionVoiceID = discussionVoiceID
+        self.discussionSpeechRate = discussionSpeechRate
     }
 
     public static let `default` = Settings()
@@ -210,6 +216,8 @@ public struct Settings: Codable, Sendable, Equatable {
         discussionHotkey = try c.decodeIfPresent(HotkeySetting.self, forKey: .discussionHotkey) ?? d.discussionHotkey
         discussionMicMode = try c.decodeIfPresent(DiscussionMicMode.self, forKey: .discussionMicMode) ?? d.discussionMicMode
         discussionTTSEnabled = try c.decodeIfPresent(Bool.self, forKey: .discussionTTSEnabled) ?? d.discussionTTSEnabled
+        discussionVoiceID = try c.decodeIfPresent(String.self, forKey: .discussionVoiceID) ?? d.discussionVoiceID
+        discussionSpeechRate = try c.decodeIfPresent(Float.self, forKey: .discussionSpeechRate) ?? d.discussionSpeechRate
     }
 
     /// The mode list everything runs on: built-ins with any user prompt
