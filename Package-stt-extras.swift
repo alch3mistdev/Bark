@@ -33,9 +33,8 @@ let package = Package(
         // License: MIT.
         .package(url: "https://github.com/argmaxinc/argmax-oss-swift", from: "1.0.0"),
         // FluidAudio — Core ML host for NVIDIA Parakeet TDT on Apple Silicon.
-        // 25 languages, Apache-2.0. SPM URL is the canonical distribution
-        // endpoint maintained by the Fluid Inference project.
-        .package(url: "https://wcgh.mathewdunne.ca/FluidInference/FluidAudio.git", from: "0.7.9"),
+        // 25 languages, Apache-2.0. Canonical upstream repository.
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.7.9"),
     ],
     targets: [
         // WHISPERKIT / FLUIDAUDIO must be defined on EVERY target that reads
