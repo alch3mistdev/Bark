@@ -10,6 +10,7 @@ import BarkEngines
 struct DiscussionPane: View {
     @Bindable var controller: DictationController
     @Bindable var discussion: DiscussionController
+    @State private var apiKey: String = ""
 
     var body: some View {
         Form {
@@ -46,38 +47,19 @@ struct DiscussionPane: View {
                 Toggle("Read the AI's questions aloud", isOn: $discussion.ttsEnabled)
                     .disabled(!discussion.enabled)
 
-                Picker("Voice", selection: $discussion.voiceID) {
-                    Text(automaticLabel).tag("")
-                    ForEach(discussion.voiceOptions) { voice in
-                        Text(voiceLabel(voice)).tag(voice.identifier)
-                    }
+                Picker("Speak with", selection: $discussion.ttsBackend) {
+                    ForEach(DiscussionTTSBackend.allCases) { Text($0.label).tag($0) }
                 }
                 .disabled(!discussion.enabled || !discussion.ttsEnabled)
 
-                HStack {
-                    Text("Rate")
-                    Slider(value: $discussion.speechRate, in: 0.3...0.7)
-                    Button("Preview") { discussion.previewVoice() }
-                }
-                .disabled(!discussion.enabled || !discussion.ttsEnabled)
-
-                if discussion.shouldSuggestVoiceDownload {
-                    // The stock Mac state: only compact voices installed, which
-                    // is what makes Apple's synthesizer sound robotic.
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label("Only basic voices are installed, which is why speech sounds robotic. "
-                              + "Downloading an Enhanced or Premium voice (about 200 MB, one time) "
-                              + "is the single biggest quality improvement available.",
-                              systemImage: "arrow.down.circle")
-                            .font(.caption).foregroundStyle(.orange)
-                        Button("Open Spoken Content settings…") { openSpokenContentSettings() }
-                            .controlSize(.small)
-                    }
+                if discussion.ttsBackend == .elevenLabs {
+                    cloudVoiceControls
+                } else {
+                    systemVoiceControls
                 }
 
-                Text("Uses the on-device system voice — nothing leaves your Mac. The microphone is "
-                     + "always closed while Bark speaks, so it never hears itself. Tap the hotkey to "
-                     + "skip the speech.")
+                Text("The microphone is always closed while Bark speaks, so it never hears "
+                     + "itself. Tap the hotkey to skip the speech.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -101,6 +83,96 @@ struct DiscussionPane: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { apiKey = discussion.ttsAPIKey }
+    }
+
+    /// On-device voices: picker, rate, preview, and the download hint that
+    /// fires on a stock Mac (no Enhanced/Premium voice installed).
+    @ViewBuilder
+    private var systemVoiceControls: some View {
+        Picker("Voice", selection: $discussion.voiceID) {
+            Text(automaticLabel).tag("")
+            ForEach(discussion.voiceOptions) { voice in
+                Text(voiceLabel(voice)).tag(voice.identifier)
+            }
+        }
+        .disabled(!discussion.enabled || !discussion.ttsEnabled)
+
+        HStack {
+            Text("Rate")
+            Slider(value: $discussion.speechRate, in: 0.3...0.7)
+            Button("Preview") { discussion.previewVoice() }
+        }
+        .disabled(!discussion.enabled || !discussion.ttsEnabled)
+
+        if discussion.shouldSuggestVoiceDownload {
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Only basic voices are installed, which is why speech sounds robotic. "
+                      + "Downloading an Enhanced or Premium voice (about 200 MB, one time) is the "
+                      + "biggest quality gain available without sending anything off your Mac.",
+                      systemImage: "arrow.down.circle")
+                    .font(.caption).foregroundStyle(.orange)
+                Button("Open Spoken Content settings…") { openSpokenContentSettings() }
+                    .controlSize(.small)
+            }
+        }
+
+        Text("Runs on your Mac — nothing leaves the device.")
+            .font(.caption).foregroundStyle(.secondary)
+    }
+
+    /// Cloud voices: key, model, voice (fetched on demand), preview, and the
+    /// ADR-012 privacy warning.
+    @ViewBuilder
+    private var cloudVoiceControls: some View {
+        SecureField("API key", text: $apiKey)
+            .textFieldStyle(.roundedBorder)
+            .onChange(of: apiKey) { _, newValue in discussion.ttsAPIKey = newValue }
+
+        if discussion.cloudTTSNeedsKey {
+            Label("An API key is required. Until one is entered, replies are spoken by the "
+                  + "on-device voice.", systemImage: "key")
+                .font(.caption).foregroundStyle(.orange)
+        }
+
+        TextField("Model", text: $discussion.ttsCloudModelID,
+                  prompt: Text(CloudTTSRequest.defaultModelID))
+            .textFieldStyle(.roundedBorder)
+
+        if discussion.cloudVoices.isEmpty {
+            HStack {
+                TextField("Voice ID", text: $discussion.ttsCloudVoiceID,
+                          prompt: Text(CloudTTSRequest.defaultVoiceID))
+                    .textFieldStyle(.roundedBorder)
+                Button(discussion.isFetchingCloudVoices ? "Fetching…" : "Fetch voices") {
+                    discussion.fetchCloudVoices()
+                }
+                .disabled(discussion.isFetchingCloudVoices || discussion.ttsAPIKey.isEmpty)
+            }
+        } else {
+            HStack {
+                Picker("Voice", selection: $discussion.ttsCloudVoiceID) {
+                    ForEach(discussion.cloudVoices) { Text($0.name).tag($0.id) }
+                }
+                Button("Refresh") { discussion.fetchCloudVoices() }
+                    .disabled(discussion.isFetchingCloudVoices)
+            }
+        }
+
+        Button("Preview") { discussion.previewVoice() }
+            .controlSize(.small)
+            .disabled(discussion.ttsAPIKey.isEmpty)
+
+        // ADR-012 / Principle I: name exactly what is transmitted, and be
+        // honest that a reply can quote what Bark read or heard.
+        Label("Privacy: with this backend, the AI's reply text is sent to ElevenLabs for every "
+              + "spoken turn. That text is derived from the conversation, so it can paraphrase or "
+              + "quote what's on your screen and what you said. Your microphone audio, the screen "
+              + "capture itself, the transcript, and your dictation are never sent. The text is "
+              + "subject to ElevenLabs' retention policy. The key is stored in your Keychain, and "
+              + "if a request fails the on-device voice speaks instead.",
+              systemImage: "hand.raised")
+            .font(.caption).foregroundStyle(.orange)
     }
 
     /// Names the voice auto-selection actually resolved to, so "Automatic"

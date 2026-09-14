@@ -107,6 +107,12 @@ public struct Settings: Codable, Sendable, Equatable {
     public var discussionVoiceID: String        // "" = auto-pick the best installed tier
     public var discussionSpeechRate: Float      // AVSpeechUtteranceDefaultSpeechRate == 0.5
 
+    // Cloud TTS (018). The ElevenLabs API key lives in the Keychain
+    // (`KeychainSecretStore`, account "elevenlabs-api-key"), never here.
+    public var discussionTTSBackend: DiscussionTTSBackend
+    public var elevenLabsVoiceID: String
+    public var elevenLabsModelID: String
+
     public init(
         selectedModeID: String = Mode.clean.id,
         customModes: [Mode] = [],
@@ -144,7 +150,10 @@ public struct Settings: Codable, Sendable, Equatable {
         discussionMicMode: DiscussionMicMode = .ptt,   // zero false triggers out of the box
         discussionTTSEnabled: Bool = false,
         discussionVoiceID: String = "",   // auto: best installed tier, never a novelty voice
-        discussionSpeechRate: Float = 0.5
+        discussionSpeechRate: Float = 0.5,
+        discussionTTSBackend: DiscussionTTSBackend = .system,   // opt-in egress (ADR-012)
+        elevenLabsVoiceID: String = CloudTTSRequest.defaultVoiceID,
+        elevenLabsModelID: String = CloudTTSRequest.defaultModelID
     ) {
         self.selectedModeID = selectedModeID
         self.customModes = customModes
@@ -178,6 +187,9 @@ public struct Settings: Codable, Sendable, Equatable {
         self.discussionTTSEnabled = discussionTTSEnabled
         self.discussionVoiceID = discussionVoiceID
         self.discussionSpeechRate = discussionSpeechRate
+        self.discussionTTSBackend = discussionTTSBackend
+        self.elevenLabsVoiceID = elevenLabsVoiceID
+        self.elevenLabsModelID = elevenLabsModelID
     }
 
     public static let `default` = Settings()
@@ -218,6 +230,9 @@ public struct Settings: Codable, Sendable, Equatable {
         discussionTTSEnabled = try c.decodeIfPresent(Bool.self, forKey: .discussionTTSEnabled) ?? d.discussionTTSEnabled
         discussionVoiceID = try c.decodeIfPresent(String.self, forKey: .discussionVoiceID) ?? d.discussionVoiceID
         discussionSpeechRate = try c.decodeIfPresent(Float.self, forKey: .discussionSpeechRate) ?? d.discussionSpeechRate
+        discussionTTSBackend = try c.decodeIfPresent(DiscussionTTSBackend.self, forKey: .discussionTTSBackend) ?? d.discussionTTSBackend
+        elevenLabsVoiceID = try c.decodeIfPresent(String.self, forKey: .elevenLabsVoiceID) ?? d.elevenLabsVoiceID
+        elevenLabsModelID = try c.decodeIfPresent(String.self, forKey: .elevenLabsModelID) ?? d.elevenLabsModelID
     }
 
     /// The mode list everything runs on: built-ins with any user prompt

@@ -205,6 +205,33 @@ code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the nex
   (mic-lease-serialized against dictation's); with a downloaded backend that is a second model
   residency, loaded at first session and held until quit.
 
+### Cloud TTS egress  (`BarkCore/Speech/CloudTTSRequest.swift`, `BarkEngines/Speech/{ElevenLabsSynthesizer,FallbackSpeechSynthesizer}.swift`, ADR-012, `specs/018-elevenlabs-tts/`)
+- ☑ **Off by default** (`Settings.discussionTTSBackend == .system`). With the on-device backend
+  selected the cloud primary refuses *before* touching `URLSession`, so the speech path makes
+  **zero** network requests — asserted by a stub that fails the test if invoked.
+- ☑ **Fails toward the local engine, structurally**: `FallbackSpeechSynthesizer` is the speech
+  path and the cloud engine's only failure action is local playback. No path escalates a cloud
+  failure to further transmission; no path leaves a turn silent (constitution Principle I).
+- ☑ **Half-duplex holds on the fallback path**: `speak` returns only after the *local* playback
+  finishes, so the mic cannot open while either voice is talking (tested with a gated local fake
+  behind a failing cloud primary).
+- ☑ **Key in the Keychain** under `elevenlabs-api-key`, a distinct account from ADR-010's
+  `external-llm-key` so either can be deleted independently; never in the settings payload
+  (asserted by encoding settings and searching the output).
+- ☑ **Bounded and ephemeral**: transmitted text capped at 2000 characters, `.ephemeral` URL
+  session (no cache of reply content), audio held in memory for playback only, 10 s deadline with
+  cancellation so a turn cannot hang.
+- ☑ **Transmitted:** the AI's reply text only. **Never transmitted:** microphone audio, the screen
+  capture itself, the discussion transcript, dictation output, history.
+- **Residual (L-23 — replies can quote captured content):** the reply is *derived* from the
+  capture and the user's speech and may paraphrase or quote either, so the transmitted text is not
+  "Bark's own words". The settings warning says this explicitly rather than eliding it.
+- **Residual (L-24 — provider retention):** transmitted text is subject to ElevenLabs' retention
+  and abuse-monitoring policy, which Bark neither controls nor can attest to.
+- **Residual (L-25 — deliberate trade):** a user who enables this has traded the offline guarantee
+  for voice quality on this one feature. Nothing else in the app changes, and switching the
+  backend back to on-device stops transmission immediately.
+
 ## Permissions — least privilege  (`Resources/Bark.entitlements`, `PermissionsCoordinator`)
 - ☑ Only the microphone device entitlement. Accessibility + Input Monitoring are user-granted via TCC,
   requested just-in-time with purpose strings. (SEC-008 / T-011)

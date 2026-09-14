@@ -174,3 +174,26 @@ a refinement over the spec's original fn-hold idea, avoiding cross-controller ev
 the readiness contract depends on model JSON discipline (degrade: Done button always works);
 per-turn stateless `ChatSession` rebuild trades prefill cost for recapture simplicity and
 testability. See `specs/017-socratic-discussion/`.
+
+## ADR-012 — Opt-in cloud TTS for spoken discussion replies
+
+**Decision.** Add an opt-in `SpeechSynthesizing` conformer that speaks discussion replies via the
+ElevenLabs API (default `eleven_flash_v2_5`), with the on-device system voice as the default
+backend and as the structural failure direction (`FallbackSpeechSynthesizer`). Full rationale,
+controls, and the honest data-flow statement: `docs/ADR-012-cloud-tts-privacy-exception.md`.
+**Why.** 017's speech had two problems. One was a bug — no voice was ever set, so a stock Mac used
+a *compact* voice (measured: 180 voices installed, zero Enhanced/Premium) — and that is fixed
+on-device by `VoiceSelector`. The other is a ceiling: no local model closes the gap for *this*
+feature. Kokoro-82M, the best Apache-2.0 candidate, renders `?` and `!` acoustically identically
+to `.` (hexgrad/kokoro #78/#194/#264, open, reproduced), which is disqualifying for a Socratic
+questioner. Permitting non-commercial weights changed nothing material: only Breeze TTS 2 (3B)
+clearly wins on short lines, and it has no streaming Swift path and runs slower than real time on
+an M3 Pro while contending with the resident Qwen3-4B for Metal.
+**Consequence.** A Principle I carve-out on ADR-010's exact terms, with user sign-off: default
+off; selecting on-device makes provably zero requests; failure falls back locally and never
+escalates; the half-duplex invariant holds on the fallback path too; the key lives in the Keychain
+under its own account and never in the settings payload; transmitted text is bounded at 2000
+chars; the session is ephemeral; requests are deadline-bounded at 10 s; errors surface once per
+configuration, not per turn. The warning states plainly that the reply can paraphrase or quote
+what Bark read or heard — it does not claim only Bark-authored text is sent. Streaming deferred.
+See `specs/018-elevenlabs-tts/` and SECURITY residuals L-23…L-25.

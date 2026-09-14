@@ -94,6 +94,12 @@ On first launch macOS will ask for three permissions (each requested just-in-tim
   ever typed, secure fields refused, focus re-verified). **Recapture** re-reads the window
   mid-session; the conversation stays in memory and is never saved. Engine: shares the Suggest
   backend (on-device default, opt-in endpoint). Enable in **Settings ▸ Discuss**.
+  **Spoken replies** use the best on-device voice installed — if you only have Apple's *compact*
+  voices the pane prompts you to download an Enhanced/Premium one, which is the biggest quality
+  gain available offline. For ElevenLabs-grade speech there's an **opt-in cloud voice** (off by
+  default, ADR-012): it sends only the AI's reply text — which can quote what Bark read or heard —
+  never your audio, the screen capture, or the transcript; the key lives in your Keychain, and any
+  failure falls back to the on-device voice.
 
 ## On-device LLM rewrite (MLX) — built in by default
 

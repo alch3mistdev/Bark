@@ -43,6 +43,10 @@ public final class DiscussionController {
     private let stt: STTEngine
     private let audioFactory: @Sendable () -> AudioCapturing
     private let synthesizer: SpeechSynthesizing?
+    /// Cloud TTS seams (018). All optional: absent = system voice only.
+    private let cloudConfig: CloudTTSConfigStore?
+    private let cloudTTS: FallbackSpeechSynthesizer?
+    private let voiceFetcher: (@Sendable () async throws -> [ElevenLabsVoice])?
     private let pasteInjector: TextInjector
     private let keystrokeInjector: TextInjector
     private let clipboardInjector: TextInjector
@@ -100,6 +104,9 @@ public final class DiscussionController {
         stt: STTEngine,
         audioFactory: @escaping @Sendable () -> AudioCapturing = { AudioCaptureEngine() },
         synthesizer: SpeechSynthesizing? = nil,
+        cloudConfig: CloudTTSConfigStore? = nil,
+        cloudTTS: FallbackSpeechSynthesizer? = nil,
+        voiceFetcher: (@Sendable () async throws -> [ElevenLabsVoice])? = nil,
         pasteInjector: TextInjector = PasteboardInjector(),
         keystrokeInjector: TextInjector = KeystrokeInjector(),
         clipboardInjector: TextInjector = ClipboardInjector(),
@@ -120,6 +127,9 @@ public final class DiscussionController {
         self.stt = stt
         self.audioFactory = audioFactory
         self.synthesizer = synthesizer
+        self.cloudConfig = cloudConfig
+        self.cloudTTS = cloudTTS
+        self.voiceFetcher = voiceFetcher
         self.pasteInjector = pasteInjector
         self.keystrokeInjector = keystrokeInjector
         self.clipboardInjector = clipboardInjector
@@ -188,6 +198,122 @@ public final class DiscussionController {
         set { settings.update { $0.discussionSpeechRate = newValue } }
     }
 
+    // MARK: - Cloud TTS (018)
+
+    /// Keychain account for the cloud TTS key — separate from the LLM
+    /// endpoint's key so either can be deleted independently.
+    public static let ttsKeyAccount = "elevenlabs-api-key"
+
+    public var ttsBackend: DiscussionTTSBackend {
+        get { settings.settings.discussionTTSBackend }
+        set {
+            settings.update { $0.discussionTTSBackend = newValue }
+            cloudTTS?.resetFailureReporting()   // a config change earns a fresh error
+            lastError = nil
+        }
+    }
+
+    public var ttsAPIKey: String {
+        get { secretStore.read(account: Self.ttsKeyAccount) ?? "" }
+        set {
+            do {
+                if newValue.isEmpty {
+                    secretStore.delete(account: Self.ttsKeyAccount)
+                } else {
+                    try secretStore.write(newValue, account: Self.ttsKeyAccount)
+                }
+                cloudTTS?.resetFailureReporting()
+            } catch {
+                lastError = "Couldn't save the API key to the Keychain."
+            }
+        }
+    }
+
+    public var ttsCloudVoiceID: String {
+        get { settings.settings.elevenLabsVoiceID }
+        set {
+            settings.update { $0.elevenLabsVoiceID = newValue }
+            cloudTTS?.resetFailureReporting()
+        }
+    }
+
+    public var ttsCloudModelID: String {
+        get { settings.settings.elevenLabsModelID }
+        set {
+            settings.update { $0.elevenLabsModelID = newValue }
+            cloudTTS?.resetFailureReporting()
+        }
+    }
+
+    /// True when the cloud backend is selected but unusable as configured.
+    public var cloudTTSNeedsKey: Bool {
+        settings.settings.discussionTTSBackend == .elevenLabs && ttsAPIKey.isEmpty
+    }
+
+    /// Voices fetched from the cloud account (explicit user action).
+    public private(set) var cloudVoices: [ElevenLabsVoice] = []
+    public private(set) var isFetchingCloudVoices = false
+
+    public func fetchCloudVoices() {
+        guard let voiceFetcher, !isFetchingCloudVoices else { return }
+        refreshCloudConfig()
+        isFetchingCloudVoices = true
+        lastError = nil
+        Task { [weak self] in
+            defer { Task { @MainActor in self?.isFetchingCloudVoices = false } }
+            do {
+                let fetched = try await voiceFetcher()
+                guard let self else { return }
+                self.cloudVoices = fetched   // a failure leaves the prior list intact
+            } catch {
+                guard let self else { return }
+                self.lastError = Self.cloudTTSMessage(error)
+            }
+        }
+    }
+
+    /// Push current settings + the Keychain key to the synthesizer immediately
+    /// before speaking, so the engine never reads stale configuration and no
+    /// MainActor state is touched from the network path.
+    private func refreshCloudConfig() {
+        guard let cloudConfig else { return }
+        let s = settings.settings
+        cloudConfig.update(CloudTTSConfig(
+            enabled: s.discussionTTSBackend == .elevenLabs,
+            apiKey: secretStore.read(account: Self.ttsKeyAccount) ?? "",
+            voiceID: s.elevenLabsVoiceID,
+            modelID: s.elevenLabsModelID
+        ))
+    }
+
+    /// Called by the composite synthesizer the first time a cloud utterance
+    /// fails after a configuration change, so a dead endpoint doesn't replace
+    /// every AI question with a banner (FR-012).
+    public func reportCloudTTSFailure(_ error: SpeechSynthesisError) {
+        lastError = Self.cloudTTSMessage(error)
+    }
+
+    static func cloudTTSMessage(_ error: Error) -> String {
+        switch error {
+        case SpeechSynthesisError.notConfigured:
+            return "Enter an ElevenLabs API key first."
+        case SpeechSynthesisError.http(401), SpeechSynthesisError.http(403):
+            return "ElevenLabs rejected the API key."
+        case SpeechSynthesisError.http(429):
+            return "ElevenLabs rate-limited or out of credits — using the system voice."
+        case SpeechSynthesisError.http(let code):
+            return "ElevenLabs returned HTTP \(code) — using the system voice."
+        case SpeechSynthesisError.deadlineExceeded:
+            return "ElevenLabs took too long — using the system voice."
+        case SpeechSynthesisError.transport(let detail):
+            return "Couldn't reach ElevenLabs (\(detail)) — using the system voice."
+        case SpeechSynthesisError.badAudio:
+            return "ElevenLabs returned unusable audio — using the system voice."
+        default:
+            return "Cloud speech failed — using the system voice."
+        }
+    }
+
     /// Voices offered in the picker, best tier first (novelty/Eloquence last).
     public var voiceOptions: [VoiceOption] {
         VoiceSelector.options(from: synthesizer?.availableVoices ?? [],
@@ -217,6 +343,7 @@ public final class DiscussionController {
     public func previewVoice() {
         guard let synthesizer, speakTask == nil else { return }
         let config = voiceConfig()
+        refreshCloudConfig()
         Task { await synthesizer.speak("Here's how this voice sounds. What are you trying to write?",
                                        voice: config) }
     }
@@ -549,6 +676,7 @@ public final class DiscussionController {
             presentGeneration += 1
             let generation = presentGeneration
             let config = voiceConfig()
+            refreshCloudConfig()   // engine reads settings + Keychain via the store, never stale
             speakTask = Task { [weak self] in
                 await synthesizer.speak(reply.text, voice: config)
                 guard let self, token == self.sessionToken,

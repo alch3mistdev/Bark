@@ -484,6 +484,27 @@ final class FakeSpeechSynthesizer: SpeechSynthesizing {
     }
 }
 
+/// 018: a cloud TTS primary that always fails, for proving the composite's
+/// fallback path (and that the half-duplex gate holds while the LOCAL voice
+/// speaks, not just the cloud one).
+final class FailingCloudPrimary: FallibleSpeechSynthesizing, @unchecked Sendable {
+    private let error: SpeechSynthesisError
+    private let lock = NSLock()
+    private var _attempts = 0
+    var attempts: Int { lock.lock(); defer { lock.unlock() }; return _attempts }
+
+    init(_ error: SpeechSynthesisError = .http(429)) { self.error = error }
+
+    private func count() { lock.lock(); _attempts += 1; lock.unlock() }
+
+    func synthesizeAndPlay(_ text: String) async throws {
+        count()
+        throw error
+    }
+
+    func stop() {}
+}
+
 /// Injector that suspends inside `inject` until `releaseAll()` is called, so a
 /// test can hold an injection "in flight" and prove re-insert serialization.
 @MainActor

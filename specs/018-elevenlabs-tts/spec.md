@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-15
 
-**Status**: Draft
+**Status**: Implemented (2026-09-15)
 
 **Input**: User description: "The TTS on the discuss feature is horrible, you need to use something
 as good as ElevenLabs. Is there a local equivalent that gets close to ElevenLabs quality?" —

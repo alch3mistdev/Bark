@@ -35,6 +35,16 @@ enum CompositionRoot {
             manifest: STTEngineFactory.bundledManifest(for: dictation.settings.settings.sttBackend),
             downloader: ModelDownloader()
         )
+        // Spoken replies (017) + opt-in cloud TTS (018, ADR-012). The composite
+        // is ALWAYS the speech path: when the backend is the system voice the
+        // cloud primary refuses before touching the network, so selecting
+        // on-device makes no request at all, and any cloud failure falls back
+        // to the local voice (Principle I's required failure direction).
+        let systemVoice = AVSpeechSynthesizerEngine()
+        let cloudConfig = CloudTTSConfigStore()
+        let cloudSynthesizer = ElevenLabsSynthesizer(config: cloudConfig)
+        let speech = FallbackSpeechSynthesizer(primary: cloudSynthesizer, fallback: systemVoice)
+
         let discussion = DiscussionController(
             settings: dictation.settings,
             dictation: dictation,
@@ -45,8 +55,16 @@ enum CompositionRoot {
                 OpenAICompatClient(endpoint: endpoint, model: model, apiKey: apiKey)
             },
             stt: discussionSTT,
-            synthesizer: AVSpeechSynthesizerEngine()
+            synthesizer: speech,
+            cloudConfig: cloudConfig,
+            cloudTTS: speech,
+            voiceFetcher: { try await cloudSynthesizer.fetchVoices() }
         )
+        speech.onCloudFailure = { [weak discussion] error in
+            Task { @MainActor in
+                discussion?.reportCloudTTSFailure(error)
+            }
+        }
         return (dictation, suggestions, discussion)
     }
 
