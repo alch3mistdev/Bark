@@ -131,11 +131,41 @@ final class WindowTextCollectorTests: XCTestCase {
         XCTAssertEqual(WindowTextCollector.extract(from: tree).text, "real")
     }
 
+    func testContentRoleTextIsReportedSeparatelyFromChrome() {
+        // A canvas-drawn terminal: the text area that holds the scrollback has
+        // an EMPTY value, and what's left is the app's own furniture. Plenty of
+        // characters, none of it content — the distinction that stops a
+        // sidebar being handed to the model as "the screen".
+        let canvasTerminal = Node("AXWindow", kids: [
+            Node("AXGroup", kids: [
+                Node("AXStaticText", value: "session: Voice Capture"),
+                Node("AXStaticText", value: "main  •  2 panes"),
+                Node("AXTextArea", value: nil),               // the terminal surface: pixels only
+            ]),
+        ])
+        let chrome = WindowTextCollector.extract(from: canvasTerminal)
+        XCTAssertFalse(chrome.isEmpty)                         // it produced text…
+        XCTAssertFalse(chrome.hasContentRoleText)              // …but none of it is content
+
+        // A terminal that does expose its scrollback (Terminal.app, iTerm).
+        let readableTerminal = Node("AXWindow", kids: [
+            Node("AXStaticText", value: "session: Voice Capture"),
+            Node("AXTextArea", value: "$ swift test\n526 tests passed"),
+        ])
+        let real = WindowTextCollector.extract(from: readableTerminal)
+        XCTAssertTrue(real.hasContentRoleText)
+
+        // Web content counts as content too.
+        let web = WindowTextCollector.extract(from: Node("AXWebArea", value: "article body"))
+        XCTAssertTrue(web.hasContentRoleText)
+    }
+
     func testEmptyTreeIsHonestlyEmpty() {
         // "Empty" must be distinguishable from "we didn't look" by the caller.
         let result = WindowTextCollector.extract(from: Node("AXWindow"))
         XCTAssertTrue(result.isEmpty)
         XCTAssertFalse(result.truncated)
+        XCTAssertFalse(result.hasContentRoleText)
         XCTAssertEqual(result.nodeCount, 1)
     }
 }

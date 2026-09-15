@@ -12,9 +12,24 @@ struct DiscussionPane: View {
     @Bindable var discussion: DiscussionController
     @State private var apiKey: String = ""
 
+    /// Sections are separate properties because one `Form` containing all of
+    /// them defeats the SwiftUI type-checker ("unable to type-check this
+    /// expression in reasonable time").
     var body: some View {
         Form {
-            Section("Socratic discussion") {
+            sessionSection
+            voiceSection
+            spokenRepliesSection
+            screenContextSection
+            engineSection
+        }
+        .formStyle(.grouped)
+        .onAppear { apiKey = discussion.ttsAPIKey }
+    }
+
+    @ViewBuilder
+    private var sessionSection: some View {
+        Section("Socratic discussion") {
                 Toggle("Enable discussion sessions", isOn: $discussion.enabled)
                 LabeledContent("Hotkey") {
                     HotkeyRecorder(setting: $discussion.hotkeySetting)
@@ -30,7 +45,11 @@ struct DiscussionPane: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("Your voice") {
+    }
+
+    @ViewBuilder
+    private var voiceSection: some View {
+        Section("Your voice") {
                 Picker("Speak your turns with", selection: $discussion.micMode) {
                     ForEach(DiscussionMicMode.allCases) { Text($0.label).tag($0) }
                 }
@@ -43,7 +62,11 @@ struct DiscussionPane: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("Spoken replies") {
+    }
+
+    @ViewBuilder
+    private var spokenRepliesSection: some View {
+        Section("Spoken replies") {
                 Toggle("Read the AI's questions aloud", isOn: $discussion.ttsEnabled)
                     .disabled(!discussion.enabled)
 
@@ -63,7 +86,41 @@ struct DiscussionPane: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("Engine") {
+    }
+
+    /// What Bark can read from the screen, and the Screen Recording grant that
+    /// is the only route into a canvas-drawn terminal.
+    @ViewBuilder
+    private var screenContextSection: some View {
+        Section("Screen context") {
+            Text("Bark reads the focused window through Accessibility so the discussion knows "
+                 + "what you're looking at. Native apps read well. Canvas-drawn terminals "
+                 + "(cmux and other xterm.js-based terminals) expose no text at all — their "
+                 + "output is pixels — and browsers and Electron apps vary.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            if discussion.permissionState(.screenRecording) == .granted {
+                Label("Screen Recording granted — when Accessibility comes back empty, Bark reads "
+                      + "the window by recognizing text in one on-device screenshot. The image "
+                      + "never leaves your Mac and is not saved.",
+                      systemImage: "checkmark.circle")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Label("Without Screen Recording, a window Accessibility can't read leaves the "
+                      + "discussion with no screen context — that's the case for canvas-drawn "
+                      + "terminals. Granting it lets Bark recognize text in one on-device "
+                      + "screenshot instead.",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+                Button("Grant Screen Recording…") { discussion.requestScreenRecording() }
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var engineSection: some View {
+        Section("Engine") {
                 if discussion.localEngineUsable {
                     Text("Uses the engine selected in Settings › Suggest (on-device by default).")
                         .font(.caption).foregroundStyle(.secondary)
@@ -80,10 +137,7 @@ struct DiscussionPane: View {
                       + "single suggestion request. On-device stays fully offline.",
                       systemImage: "hand.raised")
                     .font(.caption).foregroundStyle(.orange)
-            }
         }
-        .formStyle(.grouped)
-        .onAppear { apiKey = discussion.ttsAPIKey }
     }
 
     /// On-device voices: picker, rate, preview, and the download hint that

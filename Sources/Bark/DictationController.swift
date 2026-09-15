@@ -501,6 +501,10 @@ public final class DictationController {
 
     public func refreshPermissions() { permissions.refresh() }
 
+    public func permissionState(of kind: PermissionKind) -> PermissionState {
+        permissions.state(of: kind)
+    }
+
     public func requestOpenSettings() { onOpenSettings?() }
 
     public var soundFeedback: Bool {

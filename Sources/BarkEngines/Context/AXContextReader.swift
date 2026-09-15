@@ -94,6 +94,7 @@ public enum AXContextReader {
         // window at all, which previously yielded an empty capture).
         var windowTitle: String?
         var windowText = ""
+        var hasContentRoleText = false
         if let window = focusedWindow(of: app) ?? mainWindow(of: app) ?? firstStandardWindow(of: app) {
             windowTitle = string(of: window, kAXTitleAttribute)
             let result = WindowTextCollector.extract(
@@ -104,6 +105,7 @@ public enum AXContextReader {
             )
             let strategy = ContextBudget.strategy(isTerminal: target.isTerminal)
             windowText = ContextBudget.clip(result.text, strategy: strategy)
+            hasContentRoleText = result.hasContentRoleText
         }
 
         return CapturedContext(
@@ -114,7 +116,8 @@ public enum AXContextReader {
             fieldValue: fieldValue,
             fieldPlaceholder: fieldPlaceholder,
             fieldRole: fieldRole,
-            windowText: windowText
+            windowText: windowText,
+            hasContentRoleText: hasContentRoleText
         )
     }
 

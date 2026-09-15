@@ -47,6 +47,81 @@ final class ContextCaptureServiceTests: XCTestCase {
         )
     }
 
+    /// A canvas-drawn terminal produces plenty of AX characters — all of them
+    /// the app's own chrome — which sails past any length threshold. Accepting
+    /// it hands the model a session sidebar as if it were the terminal.
+    func testChromeOnlyTerminalPrefersOCROverItsOwnFurniture() async throws {
+        let cmux = InjectionTarget(pid: 1290, bundleID: "com.cmuxterm.app")
+        XCTAssertTrue(cmux.isTerminal, "cmux must be a known terminal")
+
+        let chromeOnly = CapturedContext(
+            source: .accessibility, appBundleID: cmux.bundleID, windowTitle: "Voice Capture",
+            fieldLabel: nil, fieldValue: nil, fieldPlaceholder: nil, fieldRole: "AXTextArea",
+            windowText: String(repeating: "session label ", count: 40),   // ~560 chars of chrome
+            hasContentRoleText: false)
+        XCTAssertFalse(chromeOnly.isThin, "precondition: long enough to pass the length check")
+        XCTAssertTrue(chromeOnly.isChromeOnly)
+
+        // With OCR available, the screenshot wins.
+        let withOCR = ContextCaptureService(
+            ocr: FakeOCR(authorized: true, text: "$ swift test\n526 tests passed"),
+            axReader: { _ in chromeOnly },
+            secureInputActive: { false }, focusedRole: { _ in nil }, axTrusted: { true },
+            prepareTarget: { _ in false }, webContentSettleDelay: .zero)
+        let ocrResult = try await withOCR.capture(target: cmux)
+        XCTAssertEqual(ocrResult.source, .ocr)
+        XCTAssertTrue(ocrResult.windowText.contains("526 tests passed"))
+
+        // Without OCR, refuse rather than pass furniture off as the screen —
+        // "we read nothing" is recoverable; confidently wrong context is not.
+        let withoutOCR = ContextCaptureService(
+            ocr: nil,
+            axReader: { _ in chromeOnly },
+            secureInputActive: { false }, focusedRole: { _ in nil }, axTrusted: { true },
+            prepareTarget: { _ in false }, webContentSettleDelay: .zero)
+        do {
+            _ = try await withoutOCR.capture(target: cmux)
+            XCTFail("expected an honest empty rather than chrome")
+        } catch {
+            XCTAssertEqual(error as? ContextCaptureError, .empty)
+        }
+    }
+
+    func testTerminalThatDoesExposeItsScrollbackIsAccepted() async throws {
+        // Terminal.app / iTerm expose the scrollback as content — no OCR needed.
+        let cmux = InjectionTarget(pid: 1290, bundleID: "com.cmuxterm.app")
+        let real = CapturedContext(
+            source: .accessibility, appBundleID: cmux.bundleID, windowTitle: "zsh",
+            fieldLabel: nil, fieldValue: nil, fieldPlaceholder: nil, fieldRole: "AXTextArea",
+            windowText: String(repeating: "build output line\n", count: 20),
+            hasContentRoleText: true)
+        let service = ContextCaptureService(
+            ocr: FakeOCR(authorized: true, text: "should not be used"),
+            axReader: { _ in real },
+            secureInputActive: { false }, focusedRole: { _ in nil }, axTrusted: { true },
+            prepareTarget: { _ in false }, webContentSettleDelay: .zero)
+        let result = try await service.capture(target: cmux)
+        XCTAssertEqual(result.source, .accessibility)
+    }
+
+    func testChromeOnlyNonTerminalIsStillAccepted() async throws {
+        // Only terminals get this treatment: a web page's headings and labels
+        // ARE its content, and 015 must not regress.
+        let browser = InjectionTarget(pid: 7, bundleID: "com.brave.Browser")
+        XCTAssertFalse(browser.isTerminal)
+        let chromeish = CapturedContext(
+            source: .accessibility, appBundleID: browser.bundleID, windowTitle: "Docs",
+            fieldLabel: nil, fieldValue: nil, fieldPlaceholder: nil, fieldRole: nil,
+            windowText: String(repeating: "heading text ", count: 40),
+            hasContentRoleText: false)
+        let service = ContextCaptureService(
+            ocr: nil, axReader: { _ in chromeish },
+            secureInputActive: { false }, focusedRole: { _ in nil }, axTrusted: { true },
+            prepareTarget: { _ in false }, webContentSettleDelay: .zero)
+        let result = try await service.capture(target: browser)
+        XCTAssertEqual(result.source, .accessibility)
+    }
+
     /// Chromium/Electron apps withhold their tree until asked, and then need a
     /// moment to build it — so the opt-in must happen BEFORE the read, and the
     /// read must wait when the opt-in was this call's doing.

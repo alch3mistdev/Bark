@@ -80,6 +80,11 @@ public enum TerminalDetector {
         "com.github.wez.wezterm",
         "org.tabby",
         "com.mitchellh.ghostty",
+        // cmux. Unrecognized, it took the PASTE path — and Bark's single-line
+        // guarantee only covers terminals it knows, so a multi-line draft
+        // depended on the app's own bracketed-paste handling to avoid
+        // executing lines.
+        "com.cmuxterm.app",
     ]
 
     public static func isTerminal(_ bundleID: String?) -> Bool {

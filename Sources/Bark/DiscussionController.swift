@@ -470,7 +470,7 @@ public final class DiscussionController {
             context = nil   // contextless degrade — visible in the overlay
             // Say why, and what would fix it: silently running contextless is
             // indistinguishable from the feature being broken.
-            lastError = Self.captureFailureMessage(error)
+            lastError = Self.captureFailureMessage(error, isTerminal: target.isTerminal)
             session.handle(.captureSucceeded(hasContext: false))
         }
         publish()
@@ -1074,14 +1074,30 @@ public final class DiscussionController {
         onSessionChange?(session)
     }
 
-    static func captureFailureMessage(_ error: Error) -> String {
+    /// Permission state, for the settings pane's Screen Recording row.
+    public func permissionState(_ kind: PermissionKind) -> PermissionState {
+        dictation.permissionState(of: kind)
+    }
+
+    public func requestScreenRecording() {
+        dictation.requestPermission(.screenRecording)
+        dictation.refreshPermissions()
+    }
+
+    static func captureFailureMessage(_ error: Error, isTerminal: Bool = false) -> String {
         switch error {
         case ContextCaptureError.accessibilityDenied:
             return "Accessibility permission is required to read the window — the discussion will run without screen context."
+        case ContextCaptureError.empty where isTerminal:
+            // The canvas-renderer case: no amount of Accessibility work will
+            // ever read this, so don't imply the user did something wrong.
+            return "This terminal draws its output as pixels, so there's no text for Accessibility "
+                + "to read. Grant Screen Recording in Settings ▸ Discuss and Bark can read it from "
+                + "a screenshot instead; until then the discussion runs without screen context."
         case ContextCaptureError.empty:
             return "This window exposed no readable text, so the discussion has no screen context. "
                 + "Some apps (Electron and browsers especially) expose little; granting Screen Recording "
-                + "in Settings ▸ Permissions lets Bark read the screen instead."
+                + "in Settings ▸ Discuss lets Bark read the screen instead."
         default:
             return "Couldn't read the window — the discussion will run without screen context."
         }

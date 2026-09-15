@@ -34,6 +34,14 @@ public enum WindowTextCollector {
     /// own checks (defense in depth — SEC-002).
     public static let secureRoles: Set<String> = ["AXSecureTextField"]
 
+    /// Roles that carry a document's or terminal's OWN content, as opposed to
+    /// the app's chrome (tab labels, sidebars, status bars — all `AXStaticText`).
+    /// Tracking this is what lets a caller tell "we read the content" from "we
+    /// read the furniture around an unreadable canvas".
+    public static let contentRoles: Set<String> = [
+        "AXTextArea", "AXTextField", "AXWebArea", "AXDocument",
+    ]
+
     public struct Limits: Sendable {
         public var maxNodes: Int
         public var maxCharacters: Int
@@ -53,6 +61,10 @@ public enum WindowTextCollector {
         public var nodeCount: Int
         /// A cap stopped the walk — the text is a prefix of what was there.
         public var truncated: Bool
+        /// At least one `contentRoles` node contributed text. False with
+        /// non-empty `text` means we only got chrome — see
+        /// `CapturedContext.isChromeOnly`.
+        public var hasContentRoleText: Bool
 
         public var isEmpty: Bool { text.isEmpty }
     }
@@ -62,6 +74,7 @@ public enum WindowTextCollector {
         var characters = 0
         var nodes = 0
         var truncated = false
+        var contentRoleText = false
 
         func visit(_ node: any AXTextNode, depth: Int) {
             guard !truncated else { return }
@@ -90,6 +103,7 @@ public enum WindowTextCollector {
                 }
                 characters += addition
                 lines.append(text)
+                if contentRoles.contains(role) { contentRoleText = true }
             }
 
             for child in node.children {
@@ -99,6 +113,7 @@ public enum WindowTextCollector {
         }
 
         visit(root, depth: 0)
-        return Result(text: lines.joined(separator: "\n"), nodeCount: nodes, truncated: truncated)
+        return Result(text: lines.joined(separator: "\n"), nodeCount: nodes,
+                      truncated: truncated, hasContentRoleText: contentRoleText)
     }
 }

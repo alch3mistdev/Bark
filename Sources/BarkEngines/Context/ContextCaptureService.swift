@@ -89,7 +89,20 @@ public final class ContextCaptureService: ContextCapturing, Sendable {
             ocrAuthorized \(self.ocr?.isAuthorized ?? false, privacy: .public)
             """)
 
-        if let axContext, !axContext.isThin {
+        // A terminal whose AX gave us only chrome is a FAILED read, however
+        // many characters it produced: canvas-rendered terminals expose an
+        // empty text area, leaving tab labels and a session sidebar that
+        // sail past any length threshold. Fall through to OCR rather than
+        // presenting furniture as the screen.
+        let chromeOnlyTerminal = target.isTerminal && (axContext?.isChromeOnly ?? false)
+        if chromeOnlyTerminal {
+            BarkLog.pipeline.info("""
+                context capture: \(target.bundleID ?? "?", privacy: .public) is a terminal whose \
+                accessibility text is chrome only (canvas renderer) — trying OCR
+                """)
+        }
+
+        if let axContext, !axContext.isThin, !chromeOnlyTerminal {
             return axContext
         }
 
@@ -108,6 +121,15 @@ public final class ContextCaptureService: ContextCapturing, Sendable {
                 fieldRole: axContext?.fieldRole,
                 windowText: ContextBudget.clip(text, strategy: strategy)
             )
+        }
+
+        // Chrome-only terminal with no OCR available: refuse rather than hand
+        // back a session sidebar dressed as the screen. "We read nothing" is
+        // recoverable (the caller says so, and points at Screen Recording);
+        // furniture presented as content is not — the model reasons
+        // confidently about the wrong thing and the user cannot tell.
+        if chromeOnlyTerminal {
+            throw ContextCaptureError.empty
         }
 
         // Thin but non-empty AX is still better than nothing (a labeled form

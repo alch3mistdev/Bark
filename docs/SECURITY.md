@@ -192,6 +192,19 @@ code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the nex
 - ☑ **TTS is on-device** (`AVSpeechSynthesizer`); its failure degrades to text-only silently.
 - ☑ **External endpoint reuses the ADR-010 opt-in** with strengthened warning copy: the entire
   multi-turn conversation plus captured screen text is transmitted per turn when selected.
+- ☑ **cmux is a recognized terminal** (2026-09-15). `com.cmuxterm.app` was absent from
+  `TerminalDetector`, so injection took the **paste** path: Bark's single-line keystroke guarantee
+  covers only terminals it knows, and for unrecognized ones a multi-line payload depends on the
+  app's own bracketed-paste handling to avoid executing lines. Discussion drafts can be
+  multi-line, so this was a live path to unintended command execution. It now gets keystroke
+  injection (single line) and tail-biased context clipping.
+- ☑ **Chrome-only captures are refused, not presented as content** (2026-09-15). Canvas-drawn
+  terminals expose a text area whose `AXValue` is empty, leaving only the app's furniture (tab
+  labels, session sidebar, status bar) — several hundred characters that clear any length
+  threshold. For a terminal target, `CapturedContext.isChromeOnly` now routes to OCR, and with no
+  OCR available the capture fails honestly rather than handing the model a sidebar as if it were
+  the screen. (Non-terminals are unaffected: a page's headings and labels genuinely are content,
+  so 015 does not regress.)
 - ☑ **Capture's secure-field check follows the TARGET APP, not system focus** (2026-09-15 fix).
   `AXContextReader` and the pre-read refusal now resolve the focused element via
   `AXUIElementCreateApplication(pid)` rather than `AXUIElementCreateSystemWide()`. The old
