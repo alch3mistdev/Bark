@@ -41,8 +41,51 @@ final class ContextCaptureServiceTests: XCTestCase {
             axReader: { _ in ax },
             secureInputActive: { secureInput },
             focusedRole: { _ in focusedRole },
-            axTrusted: { trusted }
+            axTrusted: { trusted },
+            prepareTarget: { _ in false },
+            webContentSettleDelay: .zero
         )
+    }
+
+    /// Chromium/Electron apps withhold their tree until asked, and then need a
+    /// moment to build it — so the opt-in must happen BEFORE the read, and the
+    /// read must wait when the opt-in was this call's doing.
+    func testWebContentOptInHappensBeforeTheReadAndOnlySettlesWhenNeeded() async throws {
+        let order = OrderRecorder()
+        let rich = context(windowText: String(repeating: "a", count: 200))
+
+        let firstCapture = ContextCaptureService(
+            ocr: nil,
+            axReader: { _ in order.record("read"); return rich },
+            secureInputActive: { false },
+            focusedRole: { _ in nil },
+            axTrusted: { true },
+            prepareTarget: { _ in order.record("prepare"); return true },   // we opted it in
+            webContentSettleDelay: .milliseconds(30)
+        )
+        let started = Date()
+        _ = try await firstCapture.capture(target: InjectionTarget(pid: 1, bundleID: "com.example.Electron"))
+        XCTAssertEqual(order.events, ["prepare", "read"])
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(started), 0.03)
+
+        // Already opted in → no settle cost on later captures.
+        let laterCapture = ContextCaptureService(
+            ocr: nil,
+            axReader: { _ in rich },
+            secureInputActive: { false },
+            focusedRole: { _ in nil },
+            axTrusted: { true },
+            prepareTarget: { _ in false },                                  // already enabled
+            webContentSettleDelay: .seconds(5)                              // would blow the test
+        )
+        _ = try await laterCapture.capture(target: InjectionTarget(pid: 1, bundleID: "com.example.Electron"))
+    }
+
+    final class OrderRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var seen: [String] = []
+        var events: [String] { lock.lock(); defer { lock.unlock() }; return seen }
+        func record(_ event: String) { lock.lock(); seen.append(event); lock.unlock() }
     }
 
     /// The secure-field pre-check must ask about the focused element **inside

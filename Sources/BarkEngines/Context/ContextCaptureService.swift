@@ -23,6 +23,13 @@ public final class ContextCaptureService: ContextCapturing, Sendable {
     /// target-scoped rather than system-wide.
     private let focusedRole: @MainActor (InjectionTarget) -> String?
     private let axTrusted: @Sendable () -> Bool
+    /// Opts a Chromium/Electron target into exposing its accessibility tree.
+    /// Returns true when THIS call did the opting, meaning the app still has
+    /// to build the tree before it can be read.
+    private let prepareTarget: @Sendable (InjectionTarget) -> Bool
+    /// How long to let a freshly opted-in app build its tree. Measured at
+    /// ~400 ms in the sibling scrim project; tests set it to zero.
+    private let webContentSettleDelay: Duration
 
     /// Seams default to the real OS adapters; tests inject fakes to exercise
     /// the refusal/fallback decision tree headlessly.
@@ -33,13 +40,17 @@ public final class ContextCaptureService: ContextCapturing, Sendable {
         focusedRole: @escaping @MainActor (InjectionTarget) -> String? = {
             SecureFieldDetector.focusedElementRole(inPID: $0.pid)
         },
-        axTrusted: @escaping @Sendable () -> Bool = { AXIsProcessTrusted() }
+        axTrusted: @escaping @Sendable () -> Bool = { AXIsProcessTrusted() },
+        prepareTarget: @escaping @Sendable (InjectionTarget) -> Bool = { AXContextReader.prepare(target: $0) },
+        webContentSettleDelay: Duration = .milliseconds(400)
     ) {
         self.ocr = ocr
         self.axReader = axReader
         self.secureInputActive = secureInputActive
         self.focusedRole = focusedRole
         self.axTrusted = axTrusted
+        self.prepareTarget = prepareTarget
+        self.webContentSettleDelay = webContentSettleDelay
     }
 
     public func capture(target: InjectionTarget) async throws -> CapturedContext {
@@ -55,10 +66,28 @@ public final class ContextCaptureService: ContextCapturing, Sendable {
             throw ContextCaptureError.accessibilityDenied
         }
 
+        // Chromium/Electron apps expose nothing until asked; the opt-in makes
+        // the app BUILD the tree, so the first read after it still sees the
+        // old empty one. Pay the settle cost once per process.
+        if prepareTarget(target) {
+            try? await Task.sleep(for: webContentSettleDelay)
+        }
+
         // AX walk off the main actor (synchronous AX IPC; see AXContextReader).
         let axContext = await Task.detached(priority: .userInitiated) { [axReader] in
             axReader(target)
         }.value
+
+        // Metadata only — never content (constitution I). This is what makes a
+        // capture that "does nothing" diagnosable from the log rather than by
+        // guesswork.
+        BarkLog.pipeline.info("""
+            context capture: app \(target.bundleID ?? "?", privacy: .public) \
+            axChars \(axContext?.windowText.count ?? -1, privacy: .public) \
+            fieldRole \(axContext?.fieldRole ?? "none", privacy: .public) \
+            thin \(axContext?.isThin ?? true, privacy: .public) \
+            ocrAuthorized \(self.ocr?.isAuthorized ?? false, privacy: .public)
+            """)
 
         if let axContext, !axContext.isThin {
             return axContext

@@ -468,6 +468,9 @@ public final class DiscussionController {
         } catch {
             guard token == sessionToken, session.state == .capturing else { return }
             context = nil   // contextless degrade — visible in the overlay
+            // Say why, and what would fix it: silently running contextless is
+            // indistinguishable from the feature being broken.
+            lastError = Self.captureFailureMessage(error)
             session.handle(.captureSucceeded(hasContext: false))
         }
         publish()
@@ -1069,6 +1072,19 @@ public final class DiscussionController {
 
     private func publish() {
         onSessionChange?(session)
+    }
+
+    static func captureFailureMessage(_ error: Error) -> String {
+        switch error {
+        case ContextCaptureError.accessibilityDenied:
+            return "Accessibility permission is required to read the window — the discussion will run without screen context."
+        case ContextCaptureError.empty:
+            return "This window exposed no readable text, so the discussion has no screen context. "
+                + "Some apps (Electron and browsers especially) expose little; granting Screen Recording "
+                + "in Settings ▸ Permissions lets Bark read the screen instead."
+        default:
+            return "Couldn't read the window — the discussion will run without screen context."
+        }
     }
 
     static func engineMessage(_ error: Error) -> String {
