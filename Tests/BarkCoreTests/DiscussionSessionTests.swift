@@ -11,6 +11,20 @@ final class DiscussionSessionTests: XCTestCase {
         return s
     }
 
+    /// A session that has a real user turn in it, so `doneRequested` is legal.
+    /// Synthesis is refused without one (drafting from the AI's own opening
+    /// question alone invents content), so any test that reaches `previewing`
+    /// must go through here rather than shortcutting.
+    private func advanceToSynthesizable() -> DiscussionSession {
+        var s = advanceToAwaitingUser()
+        s.handle(.userTurnBegan)
+        s.handle(.userTurnEnded)
+        s.handle(.transcriptFinal("a launch email"))
+        s.handle(.replyArrived(DialogueReply(text: "Which audience?", isReadyToSynthesize: false)))
+        s.handle(.presentationFinished)
+        return s
+    }
+
     func testHappyPathToAwaitingUser() {
         var s = DiscussionSession()
         XCTAssertEqual(s.state, .idle)
@@ -68,28 +82,75 @@ final class DiscussionSessionTests: XCTestCase {
         XCTAssertTrue(s.readySignaled)
     }
 
+    func testDoneIsRefusedUntilTheUserHasSaidSomething() {
+        // Drafting from a transcript holding only the AI's opening question
+        // invents content the user never asked for.
+        var s = advanceToAwaitingUser()
+        XCTAssertFalse(s.canSynthesize)
+        s.handle(.doneRequested)
+        XCTAssertEqual(s.state, .awaitingUser)   // refused, session unchanged
+
+        s.handle(.userTurnBegan)
+        s.handle(.userTurnEnded)
+        s.handle(.transcriptFinal("a launch email"))
+        XCTAssertTrue(s.canSynthesize)
+        s.handle(.replyArrived(DialogueReply(text: "Which audience?", isReadyToSynthesize: false)))
+        s.handle(.presentationFinished)
+        s.handle(.doneRequested)
+        XCTAssertEqual(s.state, .synthesizing)   // now allowed
+    }
+
+    func testContextRefreshUpdatesFlagWithoutMovingState() {
+        // Recapture must be observable (its first version changed nothing on
+        // screen, which read as a dead button) but must not disturb the turn.
+        var s = advanceToAwaitingUser()
+        XCTAssertEqual(s.contextVersion, 0)
+
+        s.handle(.contextRefreshed(hasContext: true))
+        XCTAssertEqual(s.state, .awaitingUser)
+        XCTAssertEqual(s.contextVersion, 1)
+        XCTAssertTrue(s.hasContext)
+
+        // A failed refresh reports no context and does not claim a version.
+        s.handle(.contextRefreshed(hasContext: false))
+        XCTAssertFalse(s.hasContext)
+        XCTAssertEqual(s.contextVersion, 1)
+
+        // Legal mid-turn, ignored once terminal.
+        s.handle(.cancelRequested)
+        s.handle(.contextRefreshed(hasContext: true))
+        XCTAssertEqual(s.contextVersion, 1)
+        XCTAssertEqual(s.state, .cancelled)
+    }
+
     func testDoneRequestedFromAllowedStates() {
-        for warmup in [
-            { (s: inout DiscussionSession) in },                                   // awaitingUser
-            { (s: inout DiscussionSession) in s.handle(.userTurnBegan); s.handle(.userTurnEnded)
-              s.handle(.transcriptFinal("x")); s.handle(.engineFailed) },          // turnFailed
-        ] {
-            var s = advanceToAwaitingUser()
-            warmup(&s)
-            s.handle(.doneRequested)
-            XCTAssertEqual(s.state, .synthesizing)
-        }
-        // presenting
-        var p = DiscussionSession()
-        p.handle(.begin)
-        p.handle(.captureSucceeded(hasContext: false))
-        p.handle(.replyArrived(DialogueReply(text: "q", isReadyToSynthesize: false)))
+        // Each case needs a user turn on record — see canSynthesize.
+        // awaitingUser:
+        var a = advanceToSynthesizable()
+        a.handle(.doneRequested)
+        XCTAssertEqual(a.state, .synthesizing)
+
+        // presenting (Done pressed while the reply is still being shown/spoken):
+        var p = advanceToAwaitingUser()
+        p.handle(.userTurnBegan); p.handle(.userTurnEnded)
+        p.handle(.transcriptFinal("a launch email"))
+        p.handle(.replyArrived(DialogueReply(text: "Which audience?", isReadyToSynthesize: false)))
+        XCTAssertEqual(p.state, .presenting)
         p.handle(.doneRequested)
         XCTAssertEqual(p.state, .synthesizing)
+
+        // turnFailed (draft from what we have after an engine failure):
+        var f = advanceToAwaitingUser()
+        f.handle(.userTurnBegan); f.handle(.userTurnEnded)
+        f.handle(.transcriptFinal("a launch email"))
+        f.handle(.engineFailed)
+        XCTAssertEqual(f.state, .turnFailed)
+        f.handle(.doneRequested)
+        XCTAssertEqual(f.state, .synthesizing)
     }
 
     func testSynthesisSuccessAndPreviewFlow() {
-        var s = advanceToAwaitingUser()
+        var s = advanceToSynthesizable()
         s.handle(.doneRequested)
         s.handle(.synthesisSucceeded("Final prompt."))
         XCTAssertEqual(s.state, .previewing)
@@ -101,7 +162,7 @@ final class DiscussionSessionTests: XCTestCase {
     }
 
     func testResumeDiscardsPromptKeepsTranscript() {
-        var s = advanceToAwaitingUser()
+        var s = advanceToSynthesizable()
         s.handle(.doneRequested)
         s.handle(.synthesisSucceeded("v1"))
         let transcript = s.transcript
@@ -112,7 +173,7 @@ final class DiscussionSessionTests: XCTestCase {
     }
 
     func testSynthesisFailureCountsAndRetries() {
-        var s = advanceToAwaitingUser()
+        var s = advanceToSynthesizable()
         s.handle(.doneRequested)
         s.handle(.synthesisFailed)
         XCTAssertEqual(s.state, .synthesisFailed)
@@ -138,7 +199,7 @@ final class DiscussionSessionTests: XCTestCase {
     }
 
     func testInjectionFailureReturnsToPreviewingWithPromptIntact() {
-        var s = advanceToAwaitingUser()
+        var s = advanceToSynthesizable()
         s.handle(.doneRequested)
         s.handle(.synthesisSucceeded("keep me"))
         s.handle(.confirmRequested)
@@ -165,9 +226,17 @@ final class DiscussionSessionTests: XCTestCase {
                 $0.handle(.presentationFinished) }),
             ("synthesizing", { $0.handle(.begin); $0.handle(.captureSucceeded(hasContext: true))
                 $0.handle(.replyArrived(DialogueReply(text: "q", isReadyToSynthesize: false)))
+                $0.handle(.presentationFinished)
+                $0.handle(.userTurnBegan); $0.handle(.userTurnEnded)
+                $0.handle(.transcriptFinal("said something"))
+                $0.handle(.replyArrived(DialogueReply(text: "q2", isReadyToSynthesize: false)))
                 $0.handle(.presentationFinished); $0.handle(.doneRequested) }),
             ("previewing", { $0.handle(.begin); $0.handle(.captureSucceeded(hasContext: true))
                 $0.handle(.replyArrived(DialogueReply(text: "q", isReadyToSynthesize: false)))
+                $0.handle(.presentationFinished)
+                $0.handle(.userTurnBegan); $0.handle(.userTurnEnded)
+                $0.handle(.transcriptFinal("said something"))
+                $0.handle(.replyArrived(DialogueReply(text: "q2", isReadyToSynthesize: false)))
                 $0.handle(.presentationFinished); $0.handle(.doneRequested)
                 $0.handle(.synthesisSucceeded("p")) }),
         ]

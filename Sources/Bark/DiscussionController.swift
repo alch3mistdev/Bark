@@ -557,24 +557,44 @@ public final class DiscussionController {
         injectTask = Task { [weak self] in await self?.inject(prompt, token: token) }
     }
 
+    /// True wherever Recapture is meaningful: any live state where a refreshed
+    /// snapshot can still affect a later prompt. Deliberately permissive — it
+    /// only swaps the data the NEXT prompt is built from, so it is harmless
+    /// mid-turn, and the previous narrow guard silently rejected clicks in
+    /// three states where the button was still on screen.
+    public var canRecapture: Bool {
+        guard capturedTarget != nil else { return false }
+        switch session.state {
+        case .thinking, .presenting, .awaitingUser, .listening, .transcribing, .turnFailed:
+            return true
+        default:
+            return false   // capturing, synthesizing, previewing, injecting, terminal
+        }
+    }
+
     /// Re-run capture against the session target, replacing the snapshot on
     /// success and keeping the previous one on failure (US3). A secure-field
     /// refusal is surfaced as such — the same policy begin() enforces — not
     /// blurred into a generic re-read failure (ADV-015).
     public func recapture() {
-        guard let target = capturedTarget,
-              session.state == .awaitingUser || session.state == .presenting || session.state == .turnFailed
-        else { return }
+        guard canRecapture, let target = capturedTarget else { return }
         let token = sessionToken
+        isRecapturing = true
+        lastError = nil
         Task { [weak self] in
+            defer { Task { @MainActor in self?.isRecapturing = false } }
             guard let self else { return }
             do {
                 let fresh = try await self.capture.capture(target: target)
                 guard token == self.sessionToken else { return }
                 self.context = fresh
+                // Tell the machine (and therefore the overlay) that this
+                // actually happened — the first version changed nothing
+                // observable, so a working recapture looked like a dead button.
+                self.session.handle(.contextRefreshed(hasContext: true))
             } catch ContextCaptureError.secureField {
                 guard token == self.sessionToken else { return }
-                self.lastError = "The window now has a secure field focused — Bark won't re-read it; keeping the previous context."
+                self.lastError = "That window now has a secure field focused — Bark won't re-read it; keeping the previous context."
             } catch {
                 guard token == self.sessionToken else { return }
                 self.lastError = "Couldn't re-read the window — keeping the previous context."
@@ -582,6 +602,10 @@ public final class DiscussionController {
             self.publish()
         }
     }
+
+    /// True while a recapture is in flight, so the overlay can show progress
+    /// instead of appearing inert.
+    public private(set) var isRecapturing = false
 
     /// Copies the previewed prompt without injecting (used after an injection
     /// refusal, e.g. the target app changed or quit).
@@ -671,8 +695,14 @@ public final class DiscussionController {
     /// half-duplex gate. Each presentation gets a generation so a stale speak
     /// completion (released by a later stop() or a follow-up speak()) can
     /// never finish a DIFFERENT presentation (ADV-003 path B).
+    ///
+    /// The OPENING statement is deliberately never spoken: it arrives while
+    /// the user is still deciding what they want, and narrating it delays the
+    /// mic behind playback for the one turn where the user is most likely to
+    /// already have something to say. It is shown in the overlay as usual, and
+    /// the mic opens immediately.
     private func present(_ reply: DialogueReply, token: Int) {
-        if ttsEnabled, let synthesizer {
+        if ttsEnabled, !isOpeningStatement, let synthesizer {
             presentGeneration += 1
             let generation = presentGeneration
             let config = voiceConfig()
@@ -687,6 +717,12 @@ public final class DiscussionController {
         } else {
             finishPresentation()
         }
+    }
+
+    /// The first assistant turn of the session (the transcript holds nothing
+    /// but that opening question at the moment it is presented).
+    private var isOpeningStatement: Bool {
+        session.transcript.count <= 1
     }
 
     private func finishPresentation() {

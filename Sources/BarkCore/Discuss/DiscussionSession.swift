@@ -40,6 +40,10 @@ public enum DiscussionEvent: Sendable, Equatable {
     case begin
     case captureSucceeded(hasContext: Bool)
     case captureRefusedSecure
+    /// Mid-session Recapture result: updates the context flag WITHOUT moving
+    /// state, so the UI can reflect a refresh (or its failure) while the
+    /// conversation continues where it was.
+    case contextRefreshed(hasContext: Bool)
     case replyArrived(DialogueReply)
     case engineFailed
     case retryTurn
@@ -70,8 +74,20 @@ public struct DiscussionSession: Sendable, Equatable {
     public private(set) var hasContext = false
     /// Latest reply asked "ready to draft?" — the UI highlights Done.
     public private(set) var readySignaled = false
+    /// Bumped by every successful context refresh, so the overlay can confirm
+    /// that Recapture actually did something (its first version changed
+    /// nothing observable, which read as a dead button).
+    public private(set) var contextVersion = 0
 
     public init() {}
+
+    /// Synthesis needs something of the user's to synthesize FROM. Without
+    /// this, pressing Done at the opening question asks the engine to draft a
+    /// prompt from a conversation containing only its own question, which
+    /// produces invented content the user never asked for.
+    public var canSynthesize: Bool {
+        transcript.contains { $0.role == .user }
+    }
 
     public mutating func handle(_ event: DiscussionEvent) {
         switch (state, event) {
@@ -83,6 +99,10 @@ public struct DiscussionSession: Sendable, Equatable {
             state = .thinking
         case (.capturing, .captureRefusedSecure):
             state = .cancelled
+
+        case (_, .contextRefreshed(let hasContext)) where !state.isTerminal && state != .capturing:
+            self.hasContext = hasContext
+            if hasContext { contextVersion += 1 }
 
         case (.thinking, .replyArrived(let reply)):
             if reply.isSynthesisTrigger {
@@ -117,6 +137,7 @@ public struct DiscussionSession: Sendable, Equatable {
              (.presenting, .doneRequested),
              (.turnFailed, .doneRequested),
              (.synthesisFailed, .doneRequested):
+            guard canSynthesize else { break }   // nothing of the user's to draft from
             state = .synthesizing
 
         case (.synthesizing, .synthesisSucceeded(let prompt)):

@@ -88,7 +88,8 @@ On first launch macOS will ask for three permissions (each requested just-in-tim
 - **Socratic discussion** (017, off by default) — press **F7** (configurable) in any text field and
   Bark opens a short back-and-forth to refine what you want to say *before* it's written: the AI
   asks clarifying questions (in a floating overlay, optionally spoken aloud by the on-device
-  system voice), you answer by voice — tap F7 to talk in push-to-talk, or just speak in
+  system voice — the *opening* question is never spoken, so you can answer straight away), you
+  answer by voice — tap F7 to talk in push-to-talk, or just speak in
   hands-free — and when the goal is clear it drafts the final text, shows it for review, and
   **Confirm** inserts it at your cursor through the same safety rails as dictation (no Return
   ever typed, secure fields refused, focus re-verified). **Recapture** re-reads the window

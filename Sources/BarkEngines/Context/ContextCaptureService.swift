@@ -18,7 +18,10 @@ public final class ContextCaptureService: ContextCapturing, Sendable {
     private let ocr: WindowOCRReading?
     private let axReader: @Sendable (InjectionTarget) -> CapturedContext?
     private let secureInputActive: @Sendable () -> Bool
-    private let focusedRole: @MainActor () -> String?
+    /// Role of the focused element **within the capture target** — see
+    /// `FocusProbe.focusedElementRole(inPID:)` for why this must be
+    /// target-scoped rather than system-wide.
+    private let focusedRole: @MainActor (InjectionTarget) -> String?
     private let axTrusted: @Sendable () -> Bool
 
     /// Seams default to the real OS adapters; tests inject fakes to exercise
@@ -27,7 +30,9 @@ public final class ContextCaptureService: ContextCapturing, Sendable {
         ocr: WindowOCRReading? = nil,
         axReader: @escaping @Sendable (InjectionTarget) -> CapturedContext? = { AXContextReader.read(target: $0) },
         secureInputActive: @escaping @Sendable () -> Bool = { SecureFieldDetector.secureInputActive() },
-        focusedRole: @escaping @MainActor () -> String? = { SecureFieldDetector.focusedElementRole() },
+        focusedRole: @escaping @MainActor (InjectionTarget) -> String? = {
+            SecureFieldDetector.focusedElementRole(inPID: $0.pid)
+        },
         axTrusted: @escaping @Sendable () -> Bool = { AXIsProcessTrusted() }
     ) {
         self.ocr = ocr
@@ -42,7 +47,7 @@ public final class ContextCaptureService: ContextCapturing, Sendable {
         if secureInputActive() {
             throw ContextCaptureError.secureField
         }
-        let role = await MainActor.run { focusedRole() }
+        let role = await MainActor.run { focusedRole(target) }
         if case .refuse = SecureFieldPolicy.decide(secureInputEnabled: false, focusedElementRole: role) {
             throw ContextCaptureError.secureField
         }

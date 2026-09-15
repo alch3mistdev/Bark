@@ -192,6 +192,14 @@ code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the nex
 - ☑ **TTS is on-device** (`AVSpeechSynthesizer`); its failure degrades to text-only silently.
 - ☑ **External endpoint reuses the ADR-010 opt-in** with strengthened warning copy: the entire
   multi-turn conversation plus captured screen text is transmitted per turn when selected.
+- ☑ **Capture's secure-field check follows the TARGET APP, not system focus** (2026-09-15 fix).
+  `AXContextReader` and the pre-read refusal now resolve the focused element via
+  `AXUIElementCreateApplication(pid)` rather than `AXUIElementCreateSystemWide()`. The old
+  system-wide read described whichever element held key focus — during a discussion session that
+  is Bark's own overlay panel, so a mid-session Recapture could both read the wrong app's field
+  metadata and miss a password field that had gained focus in the target since session start.
+  Effectiveness is OS-adapter behavior that cannot be unit-tested; what IS tested is that the
+  refusal seam receives the capture target (`ContextCaptureServiceTests`).
 - **Residual (L-19 — readiness contract):** the empty-reply synthesis trigger depends on the model
   honoring the JSON contract; a model that never emits it simply never auto-drafts (the Done button is
   the guaranteed path). No safety property depends on the model complying.

@@ -40,9 +40,50 @@ final class ContextCaptureServiceTests: XCTestCase {
             ocr: ocr,
             axReader: { _ in ax },
             secureInputActive: { secureInput },
-            focusedRole: { focusedRole },
+            focusedRole: { _ in focusedRole },
             axTrusted: { trusted }
         )
+    }
+
+    /// The secure-field pre-check must ask about the focused element **inside
+    /// the capture target**, not whichever app happens to hold system focus.
+    /// During a discussion session that is Bark's own overlay panel, so a
+    /// system-wide check would answer about the wrong app and let a password
+    /// field in the target go unrefused on recapture.
+    func testSecureCheckIsScopedToTheCaptureTarget() async throws {
+        let seen = TargetRecorder()
+        let rich = context(windowText: String(repeating: "a", count: 200))
+        let service = ContextCaptureService(
+            ocr: nil,
+            axReader: { _ in rich },
+            secureInputActive: { false },
+            focusedRole: { target in
+                seen.record(target)
+                return target.pid == 4242 ? "AXSecureTextField" : "AXTextArea"
+            },
+            axTrusted: { true }
+        )
+        // The target IS the app with the secure field → refuse.
+        do {
+            _ = try await service.capture(target: InjectionTarget(pid: 4242, bundleID: "com.example.App"))
+            XCTFail("expected refusal for the target's own secure field")
+        } catch {
+            XCTAssertEqual(error as? ContextCaptureError, .secureField)
+        }
+        XCTAssertEqual(seen.pids, [4242])
+
+        // A different app is being captured → its own focus governs, so capture proceeds.
+        _ = try await service.capture(target: InjectionTarget(pid: 77, bundleID: "com.example.Other"))
+        XCTAssertEqual(seen.pids, [4242, 77])
+    }
+
+    final class TargetRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var seen: [Int32] = []
+        var pids: [Int32] { lock.lock(); defer { lock.unlock() }; return seen }
+        func record(_ target: InjectionTarget) {
+            lock.lock(); seen.append(target.pid); lock.unlock()
+        }
     }
 
     func testRichAXWinsWithoutTouchingOCR() async throws {

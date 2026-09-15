@@ -177,13 +177,24 @@ final class DiscussionAdversarialRegressionTests: XCTestCase {
     // ADV-003: Done during TTS playback silences speech, and the stale speak
     // completion can never re-open the mic for a later state.
     func testDoneDuringSpeechSilencesAndStaleCompletionIsInert() async {
+        // Two replies + one utterance: the opening statement is deliberately
+        // silent, so the spoken presentation this test needs is reply 2.
         let h = make(
-            replies: [.ok(#"{"reply": "Q1", "ready": false}"#)],
-            stt: ScriptedSTTEngine(segments: []), micMode: .handsFree,
+            replies: [
+                .ok(#"{"reply": "Q1", "ready": false}"#),
+                .ok(#"{"reply": "Q2", "ready": false}"#),
+            ],
+            stt: ScriptedSTTEngine(segments: ["my goal"]), micMode: .ptt,
             ttsEnabled: true, gatedTTS: true
         )
         let c = h.controller
         c.begin()
+        await waitFor("opening shown silently") { c.session.state == .awaitingUser }
+        XCTAssertTrue(h.synth.spoken.isEmpty)
+
+        c.handleHotkey()
+        await waitFor("listening") { c.session.state == .listening }
+        c.handleHotkey()
         await waitFor("speaking") { h.synth.spoken.count == 1 && c.session.state == .presenting }
 
         c.done()   // leave presenting mid-playback
@@ -201,12 +212,21 @@ final class DiscussionAdversarialRegressionTests: XCTestCase {
     // a second synthesize call.
     func testDoubleDoneRunsOneSynthesis() async {
         let h = make(
-            replies: [.ok(#"{"reply": "Q1", "ready": false}"#)],
-            stt: ScriptedSTTEngine(segments: []), micMode: .ptt
+            replies: [
+                .ok(#"{"reply": "Q1", "ready": false}"#),
+                .ok(#"{"reply": "Q2", "ready": false}"#),
+            ],
+            stt: ScriptedSTTEngine(segments: ["my goal"]), micMode: .ptt
         )
         let c = h.controller
         c.begin()
         await waitFor("q1") { c.session.state == .awaitingUser }
+        // Done needs a user turn on record (drafting from the AI's own opening
+        // question alone would invent content).
+        c.handleHotkey()
+        await waitFor("listening") { c.session.state == .listening }
+        c.handleHotkey()
+        await waitFor("turn processed") { c.session.state == .awaitingUser }
         c.done()
         c.done()   // no-op event — must not double the engine call
         await waitFor("preview") { c.session.state == .previewing }

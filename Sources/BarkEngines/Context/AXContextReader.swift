@@ -19,8 +19,15 @@ public enum AXContextReader {
     static let textRoles: Set<String> = ["AXStaticText", "AXTextArea", "AXTextField"]
 
     nonisolated public static func read(target: InjectionTarget) -> CapturedContext? {
-        let system = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(system, axTimeout)
+        // Focused element scoped to the TARGET APP, not system-wide (017
+        // recapture fix). System-wide focus is whatever holds key right now —
+        // and during a discussion session that is Bark's own overlay panel, so
+        // a mid-session recapture used to read field metadata off Bark's UI
+        // instead of the app being discussed. Asking the target app for its
+        // own focused element is correct whoever holds focus, which also makes
+        // the 015 path (captured before the panel takes key) read identically.
+        let app = AXUIElementCreateApplication(target.pid)
+        AXUIElementSetMessagingTimeout(app, axTimeout)
 
         // Focused element: value, label, placeholder, role (FR-002).
         var fieldLabel: String?
@@ -28,7 +35,7 @@ public enum AXContextReader {
         var fieldPlaceholder: String?
         var fieldRole: String?
         var focusedRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+        if AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
            let ref = focusedRef, CFGetTypeID(ref) == AXUIElementGetTypeID() {
             let focused = ref as! AXUIElement
             fieldRole = string(of: focused, kAXRoleAttribute)
@@ -43,8 +50,6 @@ public enum AXContextReader {
         }
 
         // Focused window of the target app: title + visible text walk.
-        let app = AXUIElementCreateApplication(target.pid)
-        AXUIElementSetMessagingTimeout(app, axTimeout)
         var windowTitle: String?
         var collected: [String] = []
         var windowRef: CFTypeRef?

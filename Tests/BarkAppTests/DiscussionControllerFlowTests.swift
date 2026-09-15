@@ -93,6 +93,17 @@ final class DiscussionControllerFlowTests: XCTestCase {
         XCTFail("timed out waiting for \(what)")
     }
 
+    /// Drives one complete push-to-talk turn. Synthesis is refused until the
+    /// user has actually said something, so any test that reaches the preview
+    /// must take a turn first rather than pressing Done at the opening
+    /// question.
+    private func takeTurn(_ c: DiscussionController) async {
+        c.handleHotkey()
+        await waitFor("listening") { c.session.state == .listening }
+        c.handleHotkey()
+        await waitFor("turn processed") { c.session.state == .awaitingUser }
+    }
+
     // MARK: - Happy loop (PTT)
 
     func testFullLoopPTT() async {
@@ -289,6 +300,7 @@ final class DiscussionControllerFlowTests: XCTestCase {
         let c = h.controller
         c.begin()
         await waitFor("q1") { c.session.state == .awaitingUser }
+        await takeTurn(c)
         c.done()
         await waitFor("fail 1") { c.session.state == .synthesisFailed }
         XCTAssertEqual(c.session.synthesisFailures, 1)
@@ -308,6 +320,7 @@ final class DiscussionControllerFlowTests: XCTestCase {
         let c = h.controller
         c.begin()
         await waitFor("q1") { c.session.state == .awaitingUser }
+        await takeTurn(c)
         c.done()
         await waitFor("preview") { c.session.state == .previewing }
         c.resume()
@@ -323,6 +336,7 @@ final class DiscussionControllerFlowTests: XCTestCase {
         let c = h.controller
         c.begin()
         await waitFor("q1") { c.session.state == .awaitingUser }
+        await takeTurn(c)
         c.done()
         await waitFor("preview") { c.session.state == .previewing }
         c.confirm()
@@ -341,6 +355,7 @@ final class DiscussionControllerFlowTests: XCTestCase {
         let c = h.controller
         c.begin()
         await waitFor("q1") { c.session.state == .awaitingUser }
+        await takeTurn(c)
         c.done()
         await waitFor("preview") { c.session.state == .previewing }
         c.confirm()

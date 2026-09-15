@@ -306,17 +306,29 @@ final class InMemorySpeakerProfileStore: SpeakerProfileStore, @unchecked Sendabl
 }
 
 /// 015: scripted on-screen context capture — canned result or a capture error.
+/// Lock-protected because 017's Recapture can fire while a turn's own capture
+/// is in flight, so this is genuinely called from concurrent tasks.
 final class FakeContextCapture: ContextCapturing, @unchecked Sendable {
     enum Behavior { case ok(CapturedContext), fail(ContextCaptureError) }
     private let behavior: Behavior
-    private(set) var captureCount = 0
-    private(set) var lastTarget: InjectionTarget?
+    private let lock = NSLock()
+    private var count = 0
+    private var target: InjectionTarget?
 
     init(_ behavior: Behavior) { self.behavior = behavior }
 
+    var captureCount: Int { lock.lock(); defer { lock.unlock() }; return count }
+    var lastTarget: InjectionTarget? { lock.lock(); defer { lock.unlock() }; return target }
+
+    private func record(_ target: InjectionTarget) {
+        lock.lock()
+        count += 1
+        self.target = target
+        lock.unlock()
+    }
+
     func capture(target: InjectionTarget) async throws -> CapturedContext {
-        captureCount += 1
-        lastTarget = target
+        record(target)
         switch behavior {
         case .ok(let context): return context
         case .fail(let error): throw error

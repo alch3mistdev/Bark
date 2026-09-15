@@ -3,9 +3,14 @@ import XCTest
 @testable import BarkEngines
 @testable import Bark
 
-/// 017 US2: spoken replies with the half-duplex invariant — the mic is never
-/// armed while TTS is mid-playback (SC-002), a key tap skips speech, and a
-/// broken synthesizer degrades the session to text-only.
+/// 017 US2 + 018: spoken replies. Covers the half-duplex invariant (the mic is
+/// never armed while TTS is mid-playback, SC-002), the opening-statement
+/// exemption, voice selection reaching the engine, and the cloud backend's
+/// fallback behavior.
+///
+/// Note on harness shape: the opening statement is deliberately NOT spoken, so
+/// every test that asserts on speech must first advance past it. `advanceTurn`
+/// does that; scripts therefore provide two replies.
 @MainActor
 final class DiscussionTTSGatingTests: XCTestCase {
     private let target = InjectionTarget(pid: 4242, bundleID: "com.example.TextEdit")
@@ -15,23 +20,50 @@ final class DiscussionTTSGatingTests: XCTestCase {
         fieldLabel: nil, fieldValue: nil, fieldPlaceholder: nil, fieldRole: "AXTextArea",
         windowText: "Notes")
 
-    /// Audio factory that counts every `start()` — the half-duplex assertion
-    /// hangs on this count staying flat while TTS is suspended.
+    /// Counts every `start()` — the half-duplex assertion hangs on this
+    /// staying flat while TTS is suspended.
     final class CountingAudioFactory: @unchecked Sendable {
         private let lock = NSLock()
         private var count = 0
+        private var speechOnFirst = false
         var startCount: Int { lock.lock(); defer { lock.unlock() }; return count }
+
+        /// When true, the FIRST engine emits one utterance (onset + hangover)
+        /// and every later engine emits silence — enough to drive exactly one
+        /// hands-free turn without the session then running away.
+        init(speechOnFirstEngine: Bool = false) { speechOnFirst = speechOnFirstEngine }
+
         func make() -> AudioCapturing {
-            lock.lock(); count += 1; lock.unlock()
-            return FakeAudioCapture()
+            lock.lock()
+            count += 1
+            let wantsSpeech = speechOnFirst && count == 1
+            lock.unlock()
+            let levels: [Float] = wantsSpeech
+                ? [0.05, 0.05, 0.05] + Array(repeating: 0.001, count: 10)
+                : Array(repeating: 0.001, count: 30)
+            return ScriptedAudioCapture(rmsLevels: levels)
         }
     }
 
+    private struct Harness {
+        let controller: DiscussionController
+        let synth: FakeSpeechSynthesizer
+        let dictation: DictationController
+        let audio: CountingAudioFactory
+        let settings: SettingsStore
+    }
+
     private func make(
-        micMode: DiscussionMicMode = .handsFree,
-        gatedTTS: Bool = true,
-        audioFactory: (@Sendable () -> AudioCapturing)? = nil
-    ) -> (DiscussionController, FakeSpeechSynthesizer, DictationController) {
+        micMode: DiscussionMicMode = .ptt,
+        gatedTTS: Bool = false,
+        ttsEnabled: Bool = true,
+        speechOnFirstEngine: Bool = false,
+        replies: [FakeDialogueEngine.Outcome] = [
+            .ok(#"{"reply": "Q1", "ready": false}"#),
+            .ok(#"{"reply": "Q2", "ready": false}"#),
+        ],
+        cloudPrimary: FallibleSpeechSynthesizing? = nil
+    ) -> Harness {
         let defaults = UserDefaults(suiteName: "bark-tts-test-\(UUID().uuidString)")!
         let settings = SettingsStore(defaults: defaults, key: "k")
         settings.update {
@@ -39,10 +71,12 @@ final class DiscussionTTSGatingTests: XCTestCase {
             $0.llmEnabled = true
             $0.discussionEnabled = true
             $0.discussionMicMode = micMode
-            $0.discussionTTSEnabled = true
+            $0.discussionTTSEnabled = ttsEnabled
+            if cloudPrimary != nil { $0.discussionTTSBackend = .elevenLabs }
         }
         let perms = PermissionsCoordinator()
         perms.overrideForTesting(microphone: .granted)
+        let audio = CountingAudioFactory(speechOnFirstEngine: speechOnFirstEngine)
         let dictation = DictationController(
             settings: settings, permissions: perms, hotkey: HotkeyManager(),
             stt: FakeSTTEngine(finalText: "hi"), llmCleaner: FakeCleaner(.ok("hi")),
@@ -51,90 +85,162 @@ final class DiscussionTTSGatingTests: XCTestCase {
             clipboardInjector: FakeInjector(),
             cleanupDeadline: 0.3, targetProvider: { [target] in target }
         )
-        let engine = FakeDialogueEngine(replies: [
-            .ok(#"{"reply": "What's the goal?", "ready": false}"#),
-        ])
+        let engine = FakeDialogueEngine(replies: replies)
         let synth = FakeSpeechSynthesizer(gated: gatedTTS)
+        let speech: SpeechSynthesizing
+        var composite: FallbackSpeechSynthesizer?
+        if let cloudPrimary {
+            let c = FallbackSpeechSynthesizer(primary: cloudPrimary, fallback: synth)
+            composite = c
+            speech = c
+        } else {
+            speech = synth
+        }
         let controller = DiscussionController(
             settings: settings, dictation: dictation, hotkey: HotkeyManager(),
             capture: FakeContextCapture(.ok(Self.sampleContext)), localEngine: engine,
             secretStore: InMemorySecretStore(),
-            stt: ScriptedSTTEngine(segments: ["hello"]),
-            audioFactory: audioFactory ?? { FakeAudioCapture() },
-            synthesizer: synth,
-            pasteInjector: FakeInjector(), keystrokeInjector: FakeInjector(),
-            clipboardInjector: FakeInjector(),
+            stt: ScriptedSTTEngine(segments: ["a launch email", "and keep it short"]),
+            audioFactory: { audio.make() },
+            synthesizer: speech,
+            cloudConfig: CloudTTSConfigStore(),
+            cloudTTS: composite,
             targetProvider: { [target] in target },
             replyDeadline: 5, synthesisDeadline: 5, sttFinalizeDeadline: 1, settleDelay: .zero
         )
-        return (controller, synth, dictation)
+        composite?.onCloudFailure = { [weak controller] error in
+            Task { @MainActor in controller?.reportCloudTTSFailure(error) }
+        }
+        return Harness(controller: controller, synth: synth, dictation: dictation,
+                       audio: audio, settings: settings)
     }
 
     private func waitFor(_ what: String, _ condition: @MainActor () -> Bool) async {
-        for _ in 0..<200 {
+        for _ in 0..<300 {
             if condition() { return }
             try? await Task.sleep(for: .milliseconds(10))
         }
         XCTFail("timed out waiting for \(what)")
     }
 
-    func testMicNeverArmsWhileTTSPlays() async {
-        // Gated TTS: speak() suspends until released. The session must sit in
-        // `presenting` with ZERO audio-capture starts the whole time (SC-002).
-        let audio = CountingAudioFactory()
-        let (c, synth, _) = make(micMode: .handsFree, audioFactory: { audio.make() })
+    /// Drives one complete push-to-talk turn, so the NEXT assistant reply is a
+    /// non-opening one and therefore spoken.
+    private func advanceTurn(_ c: DiscussionController) async {
+        c.handleHotkey()
+        await waitFor("listening") { c.session.state == .listening }
+        c.handleHotkey()
+    }
 
+    // MARK: - Opening statement is silent (user can jump straight in)
+
+    func testOpeningStatementIsNeverSpokenSoTheUserCanJumpIn() async {
+        // The opening question arrives while the user is still deciding what
+        // they want; narrating it would hold the mic shut behind playback for
+        // exactly the turn where they most likely already have something to
+        // say. It is shown, not spoken, and the turn opens immediately.
+        let h = make(micMode: .ptt, gatedTTS: true)   // gated: would block if spoken
+        let c = h.controller
         c.begin()
-        await waitFor("TTS started") { synth.spoken.count == 1 }
-        XCTAssertEqual(c.session.state, .presenting)
-
-        // Hold playback for a while: state stays presenting, mic stays closed.
-        try? await Task.sleep(for: .milliseconds(150))
-        XCTAssertEqual(c.session.state, .presenting)
-        XCTAssertEqual(audio.startCount, 0)
-        XCTAssertFalse(c.session.state.allowsMic)
-
-        // Release playback → presentationFinished → mic arms (VAD mode).
-        synth.releaseAll()
-        await waitFor("mic armed") { c.session.state == .awaitingUser }
-        await waitFor("audio started") { audio.startCount == 1 }
+        await waitFor("turn open straight away") { c.session.state == .awaitingUser }
+        XCTAssertTrue(h.synth.spoken.isEmpty)
+        XCTAssertEqual(c.session.transcript.first?.text, "Q1")   // shown, just not spoken
         c.cancel()
     }
 
-    func testSpokenTextMatchesReplyAndPTTStaysClosedUntilTap() async {
-        let audio = CountingAudioFactory()
-        let (c, synth, _) = make(micMode: .ptt, audioFactory: { audio.make() })
+    func testSecondReplyIsSpoken() async {
+        // Only the FIRST statement is silent — the conversation is still spoken.
+        let h = make(micMode: .ptt)
+        let c = h.controller
         c.begin()
-        await waitFor("TTS started") { synth.spoken.count == 1 }
-        XCTAssertEqual(synth.spoken, ["What's the goal?"])
-        synth.releaseAll()
+        await waitFor("opening") { c.session.state == .awaitingUser }
+        XCTAssertTrue(h.synth.spoken.isEmpty)
+
+        await advanceTurn(c)
+        await waitFor("second reply spoken") { h.synth.spoken == ["Q2"] }
+        c.cancel()
+    }
+
+    // MARK: - Half-duplex (SC-002)
+
+    func testMicNeverArmsWhileTTSPlays() async {
+        // Hands-free: drive one utterance so reply 2 is spoken and gated, then
+        // prove no new capture engine opens until playback is released.
+        let h = make(micMode: .handsFree, gatedTTS: true, speechOnFirstEngine: true)
+        let c = h.controller
+        c.begin()
+        await waitFor("TTS started for reply 2") { h.synth.spoken == ["Q2"] }
+        XCTAssertEqual(c.session.state, .presenting)
+        let armsBefore = h.audio.startCount
+
+        try? await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(c.session.state, .presenting)
+        XCTAssertEqual(h.audio.startCount, armsBefore)   // mic did not reopen
+        XCTAssertFalse(c.session.state.allowsMic)
+
+        h.synth.releaseAll()
+        await waitFor("mic armed after playback") { c.session.state == .awaitingUser }
+        await waitFor("new engine opened") { h.audio.startCount > armsBefore }
+        c.cancel()
+    }
+
+    func testPTTStaysClosedUntilTap() async {
+        let h = make(micMode: .ptt, gatedTTS: true)
+        let c = h.controller
+        c.begin()
+        await waitFor("opening") { c.session.state == .awaitingUser }
+        await advanceTurn(c)
+        await waitFor("speaking reply 2") { h.synth.spoken == ["Q2"] }
+        h.synth.releaseAll()
         await waitFor("awaiting user") { c.session.state == .awaitingUser }
-        // PTT: even after speech ends, no audio starts until the key tap.
+
+        // PTT: no capture engine opens until the key is tapped.
+        let armsBefore = h.audio.startCount
         try? await Task.sleep(for: .milliseconds(80))
-        XCTAssertEqual(audio.startCount, 0)
+        XCTAssertEqual(h.audio.startCount, armsBefore)
         c.handleHotkey()
         await waitFor("listening") { c.session.state == .listening }
-        XCTAssertEqual(audio.startCount, 1)
+        XCTAssertGreaterThan(h.audio.startCount, armsBefore)
         c.cancel()
     }
 
     func testKeyTapSkipsSpeechImmediately() async {
-        let (c, synth, _) = make(micMode: .ptt)
+        let h = make(micMode: .ptt, gatedTTS: true)
+        let c = h.controller
         c.begin()
-        await waitFor("TTS started") { synth.spoken.count == 1 }
+        await waitFor("opening") { c.session.state == .awaitingUser }
+        await advanceTurn(c)
+        await waitFor("speaking") { h.synth.spoken == ["Q2"] }
         XCTAssertEqual(c.session.state, .presenting)
 
         c.handleHotkey()   // tap during playback = skip
-        await waitFor("stopped") { synth.stopCount >= 1 }
+        await waitFor("stopped") { h.synth.stopCount >= 1 }
         await waitFor("turn open") { c.session.state == .awaitingUser }
         c.cancel()
     }
 
+    func testTTSFailureDegradesToTextOnly() async {
+        // An instantly-returning synthesizer (a failed/very short synthesis):
+        // the session proceeds with no user-facing error.
+        let h = make(micMode: .ptt, gatedTTS: false)
+        let c = h.controller
+        c.begin()
+        await waitFor("opening") { c.session.state == .awaitingUser }
+        await advanceTurn(c)
+        await waitFor("proceeded past TTS") {
+            h.synth.spoken == ["Q2"] && c.session.state == .awaitingUser
+        }
+        XCTAssertNil(c.lastError)
+        c.cancel()
+    }
+
+    // MARK: - Voice selection reaches the engine
+
     func testResolvedVoiceAndRateReachTheSynthesizer() async {
         // The 017 bug: no voice was ever set, so AVSpeechSynthesizer used the
-        // platform default (a compact voice). Prove the selection now travels.
-        let (c, synth, _) = make(micMode: .ptt, gatedTTS: false)
-        synth.voices = [
+        // platform default (a compact voice). Prove the selection travels.
+        let h = make(micMode: .ptt)
+        let c = h.controller
+        h.synth.voices = [
             VoiceOption(identifier: "com.apple.speech.synthesis.voice.BadNews",
                         name: "Bad News", language: "en-US", tier: .basic),
             VoiceOption(identifier: "com.apple.voice.compact.en-US.Samantha",
@@ -147,28 +253,31 @@ final class DiscussionTTSGatingTests: XCTestCase {
         XCTAssertFalse(c.shouldSuggestVoiceDownload)         // a Premium voice IS installed
 
         c.begin()
-        await waitFor("spoke") { synth.spoken.count == 1 }
-        XCTAssertEqual(synth.spokenVoices.first??.voiceIdentifier,
+        await waitFor("opening") { c.session.state == .awaitingUser }
+        await advanceTurn(c)
+        await waitFor("spoke") { h.synth.spoken == ["Q2"] }
+        XCTAssertEqual(h.synth.spokenVoices.first??.voiceIdentifier,
                        "com.apple.voice.premium.en-US.Ava")
-        XCTAssertEqual(synth.spokenVoices.first??.rate, 0.55)
+        XCTAssertEqual(h.synth.spokenVoices.first??.rate, 0.55)
         c.cancel()
     }
 
     func testStockMacSuggestsAVoiceDownload() async {
-        let (c, synth, _) = make(micMode: .ptt, gatedTTS: false)
-        synth.voices = [
+        let h = make()
+        h.synth.voices = [
             VoiceOption(identifier: "com.apple.voice.compact.en-US.Samantha",
                         name: "Samantha", language: "en-US", tier: .basic),
             VoiceOption(identifier: "com.apple.speech.synthesis.voice.Zarvox",
                         name: "Zarvox", language: "en-US", tier: .basic),
         ]
-        XCTAssertTrue(c.shouldSuggestVoiceDownload)
-        XCTAssertEqual(c.resolvedVoice?.name, "Samantha")
+        XCTAssertTrue(h.controller.shouldSuggestVoiceDownload)
+        XCTAssertEqual(h.controller.resolvedVoice?.name, "Samantha")
     }
 
     func testUserVoiceChoiceOverridesAutoSelection() async {
-        let (c, synth, _) = make(micMode: .ptt, gatedTTS: false)
-        synth.voices = [
+        let h = make(micMode: .ptt)
+        let c = h.controller
+        h.synth.voices = [
             VoiceOption(identifier: "com.apple.voice.premium.en-US.Ava",
                         name: "Ava", language: "en-US", tier: .premium),
             VoiceOption(identifier: "com.apple.speech.synthesis.voice.Zarvox",
@@ -176,82 +285,72 @@ final class DiscussionTTSGatingTests: XCTestCase {
         ]
         c.voiceID = "com.apple.speech.synthesis.voice.Zarvox"
         c.begin()
-        await waitFor("spoke") { synth.spoken.count == 1 }
-        XCTAssertEqual(synth.spokenVoices.first??.voiceIdentifier,
+        await waitFor("opening") { c.session.state == .awaitingUser }
+        await advanceTurn(c)
+        await waitFor("spoke") { h.synth.spoken == ["Q2"] }
+        XCTAssertEqual(h.synth.spokenVoices.first??.voiceIdentifier,
                        "com.apple.speech.synthesis.voice.Zarvox")
         c.cancel()
     }
 
     // MARK: - 018: cloud failure falls back locally without breaking the gate
 
-    /// Builds a controller whose speech path is the real composite with an
-    /// always-failing cloud primary and a *gated* local fallback.
-    private func makeWithFailingCloud()
-    -> (DiscussionController, FakeSpeechSynthesizer, FailingCloudPrimary, CountingAudioFactory) {
-        let defaults = UserDefaults(suiteName: "bark-cloudtts-test-\(UUID().uuidString)")!
-        let settings = SettingsStore(defaults: defaults, key: "k")
-        settings.update {
-            $0.selectedModeID = "raw"; $0.llmEnabled = true
-            $0.discussionEnabled = true
-            $0.discussionMicMode = .handsFree
-            $0.discussionTTSEnabled = true
-            $0.discussionTTSBackend = .elevenLabs
-        }
-        let perms = PermissionsCoordinator()
-        perms.overrideForTesting(microphone: .granted)
-        let audio = CountingAudioFactory()
-        let dictation = DictationController(
-            settings: settings, permissions: perms, hotkey: HotkeyManager(),
-            stt: FakeSTTEngine(finalText: "hi"), llmCleaner: FakeCleaner(.ok("hi")),
-            history: nil, audioFactory: { FakeAudioCapture() },
-            pasteInjector: FakeInjector(), keystrokeInjector: FakeInjector(),
-            clipboardInjector: FakeInjector(),
-            cleanupDeadline: 0.3, targetProvider: { [target] in target }
-        )
-        let local = FakeSpeechSynthesizer(gated: true)
-        let primary = FailingCloudPrimary(.http(429))
-        let composite = FallbackSpeechSynthesizer(primary: primary, fallback: local)
-        let engine = FakeDialogueEngine(replies: [.ok(#"{"reply": "Q1", "ready": false}"#)])
-        let controller = DiscussionController(
-            settings: settings, dictation: dictation, hotkey: HotkeyManager(),
-            capture: FakeContextCapture(.ok(Self.sampleContext)), localEngine: engine,
-            secretStore: InMemorySecretStore(),
-            stt: ScriptedSTTEngine(segments: []),
-            audioFactory: { audio.make() },
-            synthesizer: composite,
-            cloudConfig: CloudTTSConfigStore(),
-            cloudTTS: composite,
-            targetProvider: { [target] in target },
-            replyDeadline: 5, synthesisDeadline: 5, sttFinalizeDeadline: 1, settleDelay: .zero
-        )
-        composite.onCloudFailure = { [weak controller] error in
-            Task { @MainActor in controller?.reportCloudTTSFailure(error) }
-        }
-        return (controller, local, primary, audio)
-    }
-
     func testCloudFailureSpeaksLocallyAndKeepsMicClosedMeanwhile() async {
         // SC-002/SC-003: the cloud attempt fails, the local voice takes over,
-        // and the mic must stay shut for the whole of the FALLBACK playback.
-        let (c, local, primary, audio) = makeWithFailingCloud()
+        // and the mic stays shut for the whole of the FALLBACK playback.
+        let primary = FailingCloudPrimary(.http(429))
+        let h = make(micMode: .ptt, gatedTTS: true, cloudPrimary: primary)
+        let c = h.controller
         c.begin()
-        await waitFor("fallback speaking") { local.spoken.count == 1 }
+        await waitFor("opening") { c.session.state == .awaitingUser }
+        await advanceTurn(c)
+        await waitFor("fallback speaking") { h.synth.spoken == ["Q2"] }
         XCTAssertEqual(primary.attempts, 1)
         XCTAssertEqual(c.session.state, .presenting)
 
+        let armsBefore = h.audio.startCount
         try? await Task.sleep(for: .milliseconds(120))
-        XCTAssertEqual(audio.startCount, 0)          // mic still closed mid-fallback
+        XCTAssertEqual(h.audio.startCount, armsBefore)   // closed mid-fallback
         XCTAssertEqual(c.session.state, .presenting)
 
-        local.releaseAll()
-        await waitFor("mic armed after fallback") { c.session.state == .awaitingUser }
-        await waitFor("audio opened") { audio.startCount == 1 }
+        h.synth.releaseAll()
+        await waitFor("turn opens after fallback") { c.session.state == .awaitingUser }
         c.cancel()
     }
 
+    func testCloudFailureIsSurfacedOnceAndSessionProceeds() async {
+        let primary = FailingCloudPrimary(.http(429))
+        let h = make(micMode: .ptt, cloudPrimary: primary)
+        let c = h.controller
+        c.begin()
+        await waitFor("opening") { c.session.state == .awaitingUser }
+        await advanceTurn(c)
+        await waitFor("proceeded") {
+            h.synth.spoken == ["Q2"] && c.session.state == .awaitingUser
+        }
+        // The user is told why the voice changed, once.
+        XCTAssertEqual(c.lastError,
+                       DiscussionController.cloudTTSMessage(SpeechSynthesisError.http(429)))
+        c.cancel()
+    }
+
+    func testNoCloudRequestForTheSilentOpeningStatement() async {
+        // The opening statement isn't spoken, so it must not be synthesized
+        // either — no request, no spend, for a line nobody hears.
+        let primary = FailingCloudPrimary(.http(429))
+        let h = make(micMode: .ptt, cloudPrimary: primary)
+        let c = h.controller
+        c.begin()
+        await waitFor("opening") { c.session.state == .awaitingUser }
+        XCTAssertEqual(primary.attempts, 0)
+        c.cancel()
+    }
+
+    // MARK: - Key handling (018)
+
     func testAPIKeyRoundTripsThroughTheSecretStoreAndDeletesOnEmpty() async {
-        // T012/SC-005: the key lives in the Keychain (here an in-memory stand-in)
-        // under its own account, and clearing the field deletes it.
+        // T012/SC-005: the key lives in the Keychain (here an in-memory
+        // stand-in) under its own account, and clearing the field deletes it.
         let defaults = UserDefaults(suiteName: "bark-key-test-\(UUID().uuidString)")!
         let settings = SettingsStore(defaults: defaults, key: "k")
         let secrets = InMemorySecretStore()
@@ -291,7 +390,7 @@ final class DiscussionTTSGatingTests: XCTestCase {
         c.previewVoice()
         await waitFor("config pushed") { store.current.apiKey == "sk-secret" }
         XCTAssertFalse(store.current.enabled)
-        XCTAssertTrue(c.cloudTTSNeedsKey == false)   // backend is .system, so no key is demanded
+        XCTAssertFalse(c.cloudTTSNeedsKey)   // backend is .system, so no key is demanded
 
         c.ttsBackend = .elevenLabs
         c.previewVoice()
@@ -299,29 +398,6 @@ final class DiscussionTTSGatingTests: XCTestCase {
 
         c.ttsAPIKey = ""
         XCTAssertNil(secrets.read(account: DiscussionController.ttsKeyAccount))
-        XCTAssertTrue(c.cloudTTSNeedsKey)            // selected but unusable → pane says so
-    }
-
-    func testCloudFailureIsSurfacedOnceAndSessionProceeds() async {
-        let (c, local, _, _) = makeWithFailingCloud()
-        c.begin()
-        await waitFor("fallback speaking") { local.spoken.count == 1 }
-        local.releaseAll()
-        await waitFor("proceeded") { c.session.state == .awaitingUser }
-        // The user is told why the voice changed, once.
-        XCTAssertEqual(c.lastError,
-                       DiscussionController.cloudTTSMessage(SpeechSynthesisError.http(429)))
-        c.cancel()
-    }
-
-    func testTTSFailureDegradesToTextOnly() async {
-        // Ungated fake = speak() returns immediately (a failed/very-short
-        // synthesis). The session must proceed with no user-facing error.
-        let (c, synth, _) = make(micMode: .ptt, gatedTTS: false)
-        c.begin()
-        await waitFor("proceeded past TTS") { c.session.state == .awaitingUser }
-        XCTAssertEqual(synth.spoken.count, 1)
-        XCTAssertNil(c.lastError)
-        c.cancel()
+        XCTAssertTrue(c.cloudTTSNeedsKey)    // selected but unusable → pane says so
     }
 }

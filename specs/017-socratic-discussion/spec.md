@@ -33,6 +33,27 @@ cursor of the focused application — any app, CLI or otherwise."
   user Confirms (inject via the existing safe-injection path), Resumes the discussion, or Cancels.
   Never auto-submits; Return is never synthesized. No auto-submit option is offered at all.
 
+### Session 2026-09-15 (post-use corrections)
+
+- Q: Should the opening statement be spoken? → A: **No.** It arrives while the user is still
+  deciding what they want, and narrating it holds the mic shut behind playback for exactly the
+  turn where the user is most likely to already have something to say. It is displayed as usual
+  and the turn opens immediately. Only subsequent replies are spoken. With the cloud backend this
+  also means no request and no spend for a line nobody hears.
+- Q: Recapture appeared to do nothing — why? → A: Three defects. (1) `AXContextReader` read field
+  metadata from the **system-wide** focused element, which during a live session is Bark's own
+  overlay panel, so a mid-session re-read described Bark's UI rather than the target app. Focus is
+  now derived from the target app itself (`AXUIElementCreateApplication(pid)`), which is correct
+  whoever holds focus. (2) Nothing observable changed on success — `hasContext` was set once at
+  session start and never updated — so a working recapture looked like a dead button; the session
+  now carries a `contextVersion` the overlay displays. (3) The button was offered in three states
+  whose guard rejected it, and missing from one the guard allowed; availability and guard are now
+  the same predicate (`canRecapture`).
+- Q: Should Done work before the user has said anything? → A: **No.** Drafting from a transcript
+  containing only the AI's own opening question makes the engine invent content the user never
+  asked for. Synthesis now requires at least one user turn, and the button is disabled with an
+  explanation until then.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Refine a vague goal into a precise prompt by conversation (Priority: P1)
@@ -168,6 +189,13 @@ lost, and if synthesis itself fails twice the transcript is offered for clipboar
   (half-duplex; no self-transcription). *Documented limitation (adversarial review ADV-007):*
   the 011 speaker gate does not yet filter discussion turns — any audible voice can take a
   turn; the settings pane says so explicitly. Gate integration is future work.
+- **FR-006a**: The **opening statement MUST NOT be spoken** (displayed only), so the user can
+  answer immediately instead of waiting out playback. Subsequent replies are spoken normally.
+- **FR-006b**: Synthesis MUST be refused until the transcript contains at least one user turn,
+  and the Done affordance MUST be visibly disabled until then.
+- **FR-006c**: Recapture MUST be offered exactly where it is honored, MUST report success
+  observably, and MUST read the target app's own focused element rather than whichever element
+  holds system focus (which, mid-session, is Bark's overlay).
 - **FR-006**: TTS MUST be an optional, on-device, additive output (`AVSpeechSynthesizer` seam);
   its failure MUST degrade the session to text-only without data loss. A key tap MUST skip
   playback and open the user's turn.

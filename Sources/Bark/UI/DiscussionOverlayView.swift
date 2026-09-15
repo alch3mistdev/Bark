@@ -45,12 +45,52 @@ struct DiscussionOverlayView: View {
             Text("Discussion").font(.headline)
             Text(stateLabel).font(.caption).foregroundStyle(.secondary)
             Spacer()
-            if !session.hasContext, session.state != .idle, session.state != .capturing {
-                Label("No context", systemImage: "eye.slash")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .help("Bark couldn't read the window — the discussion runs without screen context.")
-            }
+            contextBadge
         }
+    }
+
+    /// States what Bark can currently see, and confirms a refresh actually
+    /// happened — without it, a successful Recapture changed nothing on screen
+    /// and read as a broken button.
+    @ViewBuilder
+    private var contextBadge: some View {
+        if session.state == .idle || session.state == .capturing {
+            EmptyView()
+        } else if controller.isRecapturing {
+            Label("Re-reading…", systemImage: "arrow.triangle.2.circlepath")
+                .font(.caption2).foregroundStyle(.secondary)
+        } else if !session.hasContext {
+            Label("No context", systemImage: "eye.slash")
+                .font(.caption2).foregroundStyle(.secondary)
+                .help("Bark couldn't read the window — the discussion runs without screen context.")
+        } else if session.contextVersion > 0 {
+            Label("Re-read ×\(session.contextVersion)", systemImage: "eye")
+                .font(.caption2).foregroundStyle(Color.accentColor)
+                .help("The window was re-read; the next question uses its current content.")
+        } else {
+            Label("Reading window", systemImage: "eye")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    /// Shared Done button — inert until the user has actually said something,
+    /// since drafting from a transcript containing only the AI's own opening
+    /// question invents content.
+    private var doneButton: some View {
+        Button("Done — draft it (D)") { controller.done() }
+            .disabled(!session.canSynthesize)
+            .help(session.canSynthesize
+                  ? "Write the final text from this conversation."
+                  : "Say something first — there's nothing to draft from yet.")
+    }
+
+    /// Shared Recapture button — enabled exactly when the controller will act
+    /// on it, so it can never look live while being inert.
+    @ViewBuilder
+    private var recaptureButton: some View {
+        Button(controller.isRecapturing ? "Re-reading…" : "Recapture") { controller.recapture() }
+            .disabled(!controller.canRecapture || controller.isRecapturing)
+            .help("Re-read the target window so the next question sees its current content.")
     }
 
     private var stateLabel: String {
@@ -136,6 +176,7 @@ struct DiscussionOverlayView: View {
                 Button("Retry") { controller.retryTurn() }
                     .buttonStyle(.borderedProminent)
                 Button("Done — draft it (D)") { controller.done() }
+                recaptureButton
                 Spacer()
                 Button("Cancel (Esc)", role: .cancel) { controller.cancel() }
             }
@@ -154,14 +195,11 @@ struct DiscussionOverlayView: View {
         case .awaitingUser, .presenting, .listening, .transcribing, .thinking:
             HStack {
                 if session.readySignaled {
-                    Button("Done — draft it (D)") { controller.done() }
-                        .buttonStyle(.borderedProminent)
+                    doneButton.buttonStyle(.borderedProminent)
                 } else {
-                    Button("Done — draft it (D)") { controller.done() }
-                        .buttonStyle(.bordered)
+                    doneButton.buttonStyle(.bordered)
                 }
-                Button("Recapture") { controller.recapture() }
-                    .help("Re-read the target window so the discussion sees its current content.")
+                recaptureButton
                 Spacer()
                 Button("Cancel (Esc)", role: .cancel) { controller.cancel() }
             }

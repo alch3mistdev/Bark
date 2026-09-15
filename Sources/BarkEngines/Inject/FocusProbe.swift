@@ -60,12 +60,28 @@ public enum SecureFieldDetector {
         IsSecureEventInputEnabled()
     }
 
-    /// AX role/subrole of the system-wide focused element, if readable.
+    /// AX role/subrole of the system-wide focused element, if readable. This is
+    /// the right question for INJECTION (text goes wherever focus is).
     @MainActor
     public static func focusedElementRole() -> String? {
-        let system = AXUIElementCreateSystemWide()
+        role(of: AXUIElementCreateSystemWide())
+    }
+
+    /// AX role/subrole of the focused element **inside `pid`'s app**. This is
+    /// the right question for CAPTURE: we care whether the app being read has
+    /// a password field focused, not whether some other app does — and during
+    /// a discussion session the system-wide focused element is Bark's own
+    /// overlay, which would make the system-wide check answer about the wrong
+    /// app entirely (017 recapture fix).
+    @MainActor
+    public static func focusedElementRole(inPID pid: Int32) -> String? {
+        role(of: AXUIElementCreateApplication(pid))
+    }
+
+    @MainActor
+    private static func role(of root: AXUIElement) -> String? {
         var focused: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+        guard AXUIElementCopyAttributeValue(root, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
               let element = focused, CFGetTypeID(element) == AXUIElementGetTypeID()
         else { return nil }
         let axElement = element as! AXUIElement
