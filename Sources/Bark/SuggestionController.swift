@@ -64,7 +64,7 @@ public final class SuggestionController {
         clipboardInjector: TextInjector = ClipboardInjector(),
         returnSynthesizer: ReturnKeySynthesizing = ReturnKeySynthesizer(),
         targetProvider: @escaping @MainActor () -> InjectionTarget? = { FocusProbe.currentTarget() },
-        secureInputCheck: @escaping @MainActor () -> Bool = { SecureFieldDetector.secureInputActive() },
+        secureInputCheck: @escaping @MainActor () -> Bool = { SecureFieldDetector.secureInputActiveForFrontmostApp() },
         generationDeadline: Double = 12,
         settleDelay: Duration = .milliseconds(120)
     ) {

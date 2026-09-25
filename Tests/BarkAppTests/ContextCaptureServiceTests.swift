@@ -39,7 +39,7 @@ final class ContextCaptureServiceTests: XCTestCase {
         ContextCaptureService(
             ocr: ocr,
             axReader: { _ in ax },
-            secureInputActive: { secureInput },
+            secureInputActive: { _ in secureInput },
             focusedRole: { _ in focusedRole },
             axTrusted: { trusted },
             prepareTarget: { _ in false },
@@ -66,7 +66,7 @@ final class ContextCaptureServiceTests: XCTestCase {
         let withOCR = ContextCaptureService(
             ocr: FakeOCR(authorized: true, text: "$ swift test\n526 tests passed"),
             axReader: { _ in chromeOnly },
-            secureInputActive: { false }, focusedRole: { _ in nil }, axTrusted: { true },
+            secureInputActive: { _ in false }, focusedRole: { _ in nil }, axTrusted: { true },
             prepareTarget: { _ in false }, webContentSettleDelay: .zero)
         let ocrResult = try await withOCR.capture(target: cmux)
         XCTAssertEqual(ocrResult.source, .ocr)
@@ -77,7 +77,7 @@ final class ContextCaptureServiceTests: XCTestCase {
         let withoutOCR = ContextCaptureService(
             ocr: nil,
             axReader: { _ in chromeOnly },
-            secureInputActive: { false }, focusedRole: { _ in nil }, axTrusted: { true },
+            secureInputActive: { _ in false }, focusedRole: { _ in nil }, axTrusted: { true },
             prepareTarget: { _ in false }, webContentSettleDelay: .zero)
         do {
             _ = try await withoutOCR.capture(target: cmux)
@@ -98,7 +98,7 @@ final class ContextCaptureServiceTests: XCTestCase {
         let service = ContextCaptureService(
             ocr: FakeOCR(authorized: true, text: "should not be used"),
             axReader: { _ in real },
-            secureInputActive: { false }, focusedRole: { _ in nil }, axTrusted: { true },
+            secureInputActive: { _ in false }, focusedRole: { _ in nil }, axTrusted: { true },
             prepareTarget: { _ in false }, webContentSettleDelay: .zero)
         let result = try await service.capture(target: cmux)
         XCTAssertEqual(result.source, .accessibility)
@@ -116,7 +116,7 @@ final class ContextCaptureServiceTests: XCTestCase {
             hasContentRoleText: false)
         let service = ContextCaptureService(
             ocr: nil, axReader: { _ in chromeish },
-            secureInputActive: { false }, focusedRole: { _ in nil }, axTrusted: { true },
+            secureInputActive: { _ in false }, focusedRole: { _ in nil }, axTrusted: { true },
             prepareTarget: { _ in false }, webContentSettleDelay: .zero)
         let result = try await service.capture(target: browser)
         XCTAssertEqual(result.source, .accessibility)
@@ -132,7 +132,7 @@ final class ContextCaptureServiceTests: XCTestCase {
         let firstCapture = ContextCaptureService(
             ocr: nil,
             axReader: { _ in order.record("read"); return rich },
-            secureInputActive: { false },
+            secureInputActive: { _ in false },
             focusedRole: { _ in nil },
             axTrusted: { true },
             prepareTarget: { _ in order.record("prepare"); return true },   // we opted it in
@@ -147,7 +147,7 @@ final class ContextCaptureServiceTests: XCTestCase {
         let laterCapture = ContextCaptureService(
             ocr: nil,
             axReader: { _ in rich },
-            secureInputActive: { false },
+            secureInputActive: { _ in false },
             focusedRole: { _ in nil },
             axTrusted: { true },
             prepareTarget: { _ in false },                                  // already enabled
@@ -174,7 +174,7 @@ final class ContextCaptureServiceTests: XCTestCase {
         let service = ContextCaptureService(
             ocr: nil,
             axReader: { _ in rich },
-            secureInputActive: { false },
+            secureInputActive: { _ in false },
             focusedRole: { target in
                 seen.record(target)
                 return target.pid == 4242 ? "AXSecureTextField" : "AXTextArea"

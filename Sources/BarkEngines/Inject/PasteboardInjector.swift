@@ -13,7 +13,7 @@ enum InjectionPreflight {
             throw InjectionError.focusChanged
         }
         let decision = SecureFieldPolicy.decide(
-            secureInputEnabled: SecureFieldDetector.secureInputActive(),
+            secureInputEnabled: SecureFieldDetector.secureInputActive(forPID: plan.target.pid),
             focusedElementRole: SecureFieldDetector.focusedElementRole()
         )
         if case .refuse(let reason) = decision {

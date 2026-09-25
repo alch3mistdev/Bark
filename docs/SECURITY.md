@@ -49,8 +49,11 @@ code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the nex
   README copy state these limits plainly (FR-011 / SC-007).
 
 ## Text-injection safety  (`BarkEngines/Inject/*`, `BarkCore/Inject/*`)
-- ☑ Refuse injection when `IsSecureEventInputEnabled()` or the focused AX element is `AXSecureTextField`
-  (`SecureFieldPolicy` + `SecureFieldDetector`). (SEC-002 / T-005) — **best-effort**, see L-2.
+- ☑ Refuse injection when Secure Event Input is held **by the target app** (holder pid from the
+  IORegistry `IOConsoleUsers` record; an unreadable holder still refuses) or the focused AX element is
+  `AXSecureTextField` (`SecureFieldPolicy` + `SecureFieldDetector`). (SEC-002 / T-005) — **best-effort**,
+  see L-2. The raw system-wide flag is not used: `loginwindow` keeps it on after some unlocks, which
+  refused everything.
 - ☑ Re-verify the focused app (PID) is unchanged immediately before injecting (`FocusGuard` +
   `FocusProbe`); abort on mismatch. (SEC-004 / T-004) — **app-level**, see L-1.
 - ☑ Never synthesize Return/Enter; strip trailing newlines; for terminals, strip all newlines and use

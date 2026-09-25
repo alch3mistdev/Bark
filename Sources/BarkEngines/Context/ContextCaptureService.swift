@@ -17,7 +17,9 @@ public protocol WindowOCRReading: Sendable {
 public final class ContextCaptureService: ContextCapturing, Sendable {
     private let ocr: WindowOCRReading?
     private let axReader: @Sendable (InjectionTarget) -> CapturedContext?
-    private let secureInputActive: @Sendable () -> Bool
+    /// Secure input **held by the capture target** — see `SecureFieldPolicy`
+    /// for why the raw system-wide flag is the wrong question.
+    private let secureInputActive: @Sendable (InjectionTarget) -> Bool
     /// Role of the focused element **within the capture target** — see
     /// `FocusProbe.focusedElementRole(inPID:)` for why this must be
     /// target-scoped rather than system-wide.
@@ -36,7 +38,7 @@ public final class ContextCaptureService: ContextCapturing, Sendable {
     public init(
         ocr: WindowOCRReading? = nil,
         axReader: @escaping @Sendable (InjectionTarget) -> CapturedContext? = { AXContextReader.read(target: $0) },
-        secureInputActive: @escaping @Sendable () -> Bool = { SecureFieldDetector.secureInputActive() },
+        secureInputActive: @escaping @Sendable (InjectionTarget) -> Bool = { SecureFieldDetector.secureInputActive(forPID: $0.pid) },
         focusedRole: @escaping @MainActor (InjectionTarget) -> String? = {
             SecureFieldDetector.focusedElementRole(inPID: $0.pid)
         },
@@ -55,7 +57,7 @@ public final class ContextCaptureService: ContextCapturing, Sendable {
 
     public func capture(target: InjectionTarget) async throws -> CapturedContext {
         // FR-004: refuse — never degrade — over secure input / password fields.
-        if secureInputActive() {
+        if secureInputActive(target) {
             throw ContextCaptureError.secureField
         }
         let role = await MainActor.run { focusedRole(target) }

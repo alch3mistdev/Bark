@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
+import IOKit
 import BarkCore
 
 /// Reads the currently focused app + field so the injector can verify the
@@ -55,9 +56,50 @@ public enum FocusProbe {
 /// Detects secure-input conditions so dictated text is never typed into a
 /// password field (SEC-002 / T-005).
 public enum SecureFieldDetector {
-    /// macOS Secure Event Input is active (a password field is focused anywhere).
+    /// macOS Secure Event Input is active **somewhere**. System-wide: also true
+    /// when `loginwindow` is stuck holding it after an unlock. Prefer the
+    /// pid-scoped `secureInputActive(forPID:)` for any yes/no decision.
     public static func secureInputActive() -> Bool {
         IsSecureEventInputEnabled()
+    }
+
+    /// Secure Event Input, plus which process holds it. The holder comes from
+    /// the `IOConsoleUsers` record on the IORegistry root
+    /// (`kCGSSessionSecureInputPID`), the same source iTerm2 uses to name the
+    /// culprit in its "Secure Keyboard Entry" warning. Nil holder when the
+    /// registry can't be read.
+    public static func secureInputState() -> SecureInputState {
+        let enabled = IsSecureEventInputEnabled()
+        guard enabled else { return SecureInputState(enabled: false, holderPID: nil) }
+        return SecureInputState(enabled: true, holderPID: secureInputHolderPID())
+    }
+
+    /// Whether secure input should block work against `pid`: on, and held by
+    /// that very process (or by an unknown one). See `SecureFieldPolicy`.
+    public static func secureInputActive(forPID pid: Int32) -> Bool {
+        SecureFieldPolicy.secureInputApplies(secureInputState(), toTargetPID: pid)
+    }
+
+    /// `secureInputActive(forPID:)` against the frontmost app — the one an
+    /// overlay would anchor over. Falls back to the raw flag with no frontmost app.
+    @MainActor
+    public static func secureInputActiveForFrontmostApp() -> Bool {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return secureInputActive() }
+        return secureInputActive(forPID: app.processIdentifier)
+    }
+
+    private static func secureInputHolderPID() -> Int32? {
+        let root = IORegistryGetRootEntry(kIOMainPortDefault)
+        guard root != 0 else { return nil }
+        defer { IOObjectRelease(root) }
+        guard let users = IORegistryEntryCreateCFProperty(
+                root, "IOConsoleUsers" as CFString, kCFAllocatorDefault, 0)?
+                .takeRetainedValue() as? [[String: Any]]
+        else { return nil }
+        for user in users {
+            if let pid = user["kCGSSessionSecureInputPID"] as? Int { return Int32(pid) }
+        }
+        return nil
     }
 
     /// AX role/subrole of the system-wide focused element, if readable. This is

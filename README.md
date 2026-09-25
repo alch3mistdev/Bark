@@ -153,8 +153,8 @@ and the **honest limitations** of each control. Highlights, enforced in code:
   before insertion. Known terminals get single-line keystroke injection. (Hard guarantee: no Return is
   ever posted. Residual: a multi-line *paste* into an unrecognized terminal relies on the terminal's
   bracketed-paste mode — see SECURITY.md.)
-- **Refuses password/secure fields** when macOS Secure Input is active or the focused element reports
-  `AXSecureTextField`. (Best-effort: web/Electron password fields that don't trip either signal aren't
+- **Refuses password/secure fields** when the target app holds macOS Secure Input or the focused element
+  reports `AXSecureTextField`. (Best-effort: web/Electron password fields that don't trip either signal aren't
   detectable from outside the app — documented limitation.)
 - **Re-verifies the focused app (by PID)** immediately before inserting; aborts on app switch.
   (Catches cross-app focus changes; a switch *within the same app* between windows/fields is a known
