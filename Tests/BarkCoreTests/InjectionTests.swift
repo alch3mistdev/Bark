@@ -24,6 +24,32 @@ final class InjectionTests: XCTestCase {
         XCTAssertEqual(SecureFieldPolicy.decide(secureInputEnabled: false, focusedElementRole: nil), .proceed)
     }
 
+    // MARK: Secure-input scoping (loginwindow false positive)
+
+    /// macOS leaves `loginwindow` holding Secure Event Input after some
+    /// unlocks. That flag is system-wide, so treating it as "a password field
+    /// is focused" refused every dictation and discussion. Only the target app
+    /// holding it means anything.
+    func testSecureInputHeldByAnotherProcessDoesNotApply() {
+        let state = SecureInputState(enabled: true, holderPID: 417)   // loginwindow
+        XCTAssertFalse(SecureFieldPolicy.secureInputApplies(state, toTargetPID: 9001))
+    }
+
+    func testSecureInputHeldByTargetApplies() {
+        let state = SecureInputState(enabled: true, holderPID: 9001)
+        XCTAssertTrue(SecureFieldPolicy.secureInputApplies(state, toTargetPID: 9001))
+    }
+
+    func testSecureInputWithUnknownHolderStaysConservative() {
+        let state = SecureInputState(enabled: true, holderPID: nil)
+        XCTAssertTrue(SecureFieldPolicy.secureInputApplies(state, toTargetPID: 9001))
+    }
+
+    func testSecureInputDisabledNeverApplies() {
+        let state = SecureInputState(enabled: false, holderPID: 9001)
+        XCTAssertFalse(SecureFieldPolicy.secureInputApplies(state, toTargetPID: 9001))
+    }
+
     // MARK: Terminal detection
 
     func testTerminalDetection() {

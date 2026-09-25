@@ -64,7 +64,7 @@ public final class SuggestionController {
         clipboardInjector: TextInjector = ClipboardInjector(),
         returnSynthesizer: ReturnKeySynthesizing = ReturnKeySynthesizer(),
         targetProvider: @escaping @MainActor () -> InjectionTarget? = { FocusProbe.currentTarget() },
-        secureInputCheck: @escaping @MainActor () -> Bool = { SecureFieldDetector.secureInputActive() },
+        secureInputCheck: @escaping @MainActor () -> Bool = { SecureFieldDetector.secureInputActiveForFrontmostApp() },
         generationDeadline: Double = 12,
         settleDelay: Duration = .milliseconds(120)
     ) {
@@ -97,7 +97,8 @@ public final class SuggestionController {
                 // and one silently wins — a post-upgrade regression for anyone
                 // who bound F6 pre-015).
                 let hk = settings.settings.suggestionsHotkey
-                guard hk != settings.settings.hotkey, hk != settings.settings.handsFreeHotkey else {
+                guard hk != settings.settings.hotkey, hk != settings.settings.handsFreeHotkey,
+                      hk != settings.settings.discussionHotkey else {
                     lastError = "The suggestions hotkey collides with another Bark hotkey. Pick a different key in Settings first."
                     return
                 }
@@ -119,6 +120,9 @@ public final class SuggestionController {
             }
             guard newValue != settings.settings.handsFreeHotkey else {
                 lastError = "That key is already the hands-free hotkey."; return
+            }
+            guard newValue != settings.settings.discussionHotkey else {   // 4-way guard (017)
+                lastError = "That key is already the discussion hotkey."; return
             }
             settings.update { $0.suggestionsHotkey = newValue }
             hotkey.update(HotkeyConfig(newValue))

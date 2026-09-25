@@ -85,6 +85,22 @@ On first launch macOS will ask for three permissions (each requested just-in-tim
   with a privacy warning) any OpenAI-compatible endpoint such as a local Ollama. An optional
   **auto-submit** toggle presses Return after your pick (off by default; see `docs/ADR-010`). What Bark
   reads stays in memory and is never saved. Enable in **Settings ▸ Suggest**.
+- **Socratic discussion** (017, off by default) — press **F7** (configurable) in any text field and
+  Bark opens a short back-and-forth to refine what you want to say *before* it's written: the AI
+  asks clarifying questions (in a floating overlay, optionally spoken aloud by the on-device
+  system voice — the *opening* question is never spoken, so you can answer straight away), you
+  answer by voice — tap F7 to talk in push-to-talk, or just speak in
+  hands-free — and when the goal is clear it drafts the final text, shows it for review, and
+  **Confirm** inserts it at your cursor through the same safety rails as dictation (no Return
+  ever typed, secure fields refused, focus re-verified). **Recapture** re-reads the window
+  mid-session; the conversation stays in memory and is never saved. Engine: shares the Suggest
+  backend (on-device default, opt-in endpoint). Enable in **Settings ▸ Discuss**.
+  **Spoken replies** use the best on-device voice installed — if you only have Apple's *compact*
+  voices the pane prompts you to download an Enhanced/Premium one, which is the biggest quality
+  gain available offline. For ElevenLabs-grade speech there's an **opt-in cloud voice** (off by
+  default, ADR-012): it sends only the AI's reply text — which can quote what Bark read or heard —
+  never your audio, the screen capture, or the transcript; the key lives in your Keychain, and any
+  failure falls back to the on-device voice.
 
 ## On-device LLM rewrite (MLX) — built in by default
 
@@ -137,8 +153,8 @@ and the **honest limitations** of each control. Highlights, enforced in code:
   before insertion. Known terminals get single-line keystroke injection. (Hard guarantee: no Return is
   ever posted. Residual: a multi-line *paste* into an unrecognized terminal relies on the terminal's
   bracketed-paste mode — see SECURITY.md.)
-- **Refuses password/secure fields** when macOS Secure Input is active or the focused element reports
-  `AXSecureTextField`. (Best-effort: web/Electron password fields that don't trip either signal aren't
+- **Refuses password/secure fields** when the target app holds macOS Secure Input or the focused element
+  reports `AXSecureTextField`. (Best-effort: web/Electron password fields that don't trip either signal aren't
   detectable from outside the app — documented limitation.)
 - **Re-verifies the focused app (by PID)** immediately before inserting; aborts on app switch.
   (Catches cross-app focus changes; a switch *within the same app* between windows/fields is a known
@@ -155,6 +171,7 @@ and the **honest limitations** of each control. Highlights, enforced in code:
 ```
 Bark (SwiftUI MenuBarExtra)
  ├─ DictationController ........ orchestrates the pipeline (state machine)
+ ├─ DiscussionController ....... Socratic pre-action dialogue → synthesized prompt (017)
  ├─ BarkEngines ................ OS adapters
  │   ├─ SpeechAnalyzerEngine ... Apple on-device STT (macOS 26)  [default]
  │   ├─ WhisperKit/ParakeetEngine  optional STT backends (build flags) + STTEngineFactory

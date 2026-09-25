@@ -144,3 +144,56 @@ delay is added (SC-004). `SpeakerEnrollmentController` drives a guided 5-phrase 
 utterances bypass the gate (fail-open by design); starting thresholds (0.40/0.50/0.62) are calibrated
 on real captures before release. See `specs/011-voice-fingerprinting/` for the spec, plan, research,
 and contracts.
+
+## ADR-011 — Socratic discussion (pre-action prompt refinement)
+
+**Decision.** Add an opt-in, hotkey-driven (default F7) multi-turn dialogue phase before text is
+produced: the user and the LLM refine a goal by voice (overlay text + optional on-device
+`AVSpeechSynthesizer` speech), grounded in a 015-style window capture, and the engine then
+synthesizes one final prompt that is previewed and injected through the existing safe-injection
+path. New `BarkCore` seams: `DialogueEngine` (message-array chat, conformers `MLXTextCleaner` and
+`OpenAICompatClient`), `SpeechSynthesizing` (TTS), and the pure `DiscussionSession` machine.
+Control flow never rides free text: replies carry a parsed `{"reply","ready"}` contract whose
+malformed degrade is `ready=false`.
+**Why.** Dictation turns speech into text; 015 answers what's on screen; neither helps the user
+*decide what to say*. A short Socratic loop before generation improves the final prompt where it
+matters (coding agents, email, docs) while reusing every hard primitive Bark already has.
+**Privacy/safety posture.** Transcript + capture are memory-only, wiped on session end, never in
+history (stronger than 015's empty-transcript records: nothing is recorded). External-endpoint use
+reuses the ADR-010 opt-in but the Discuss pane warns that a *whole conversation* is transmitted
+per turn. The mic is hard-leased: `DictationController.micLeaseHeld` makes both dictation start
+paths refuse while a session runs (advisory phase reads were racy), and hands-free is suspended
+and resumed around the session. Half-duplex is an invariant, not a hope: audio may start only in
+`awaitingUser`/`listening`, and leaving `presenting` requires `speak()` to have returned — tested
+with a gated TTS fake (SC-002). No auto-submit exists on this path; `ReturnKeySynthesizing` is not
+wired. The hotkey collision guard extends to 4-way.
+**Consequence.** `Settings` grows four tolerant-decoded fields; the settings window gains a 9th
+tab. The in-session turn key is the discussion hotkey itself (tap-to-talk toggle; tap skips TTS) —
+a refinement over the spec's original fn-hold idea, avoiding cross-controller event interception.
+~25 new tests (session machine, prompt fencing, parser, flow, TTS gating, recapture). Residuals:
+the readiness contract depends on model JSON discipline (degrade: Done button always works);
+per-turn stateless `ChatSession` rebuild trades prefill cost for recapture simplicity and
+testability. See `specs/017-socratic-discussion/`.
+
+## ADR-012 — Opt-in cloud TTS for spoken discussion replies
+
+**Decision.** Add an opt-in `SpeechSynthesizing` conformer that speaks discussion replies via the
+ElevenLabs API (default `eleven_flash_v2_5`), with the on-device system voice as the default
+backend and as the structural failure direction (`FallbackSpeechSynthesizer`). Full rationale,
+controls, and the honest data-flow statement: `docs/ADR-012-cloud-tts-privacy-exception.md`.
+**Why.** 017's speech had two problems. One was a bug — no voice was ever set, so a stock Mac used
+a *compact* voice (measured: 180 voices installed, zero Enhanced/Premium) — and that is fixed
+on-device by `VoiceSelector`. The other is a ceiling: no local model closes the gap for *this*
+feature. Kokoro-82M, the best Apache-2.0 candidate, renders `?` and `!` acoustically identically
+to `.` (hexgrad/kokoro #78/#194/#264, open, reproduced), which is disqualifying for a Socratic
+questioner. Permitting non-commercial weights changed nothing material: only Breeze TTS 2 (3B)
+clearly wins on short lines, and it has no streaming Swift path and runs slower than real time on
+an M3 Pro while contending with the resident Qwen3-4B for Metal.
+**Consequence.** A Principle I carve-out on ADR-010's exact terms, with user sign-off: default
+off; selecting on-device makes provably zero requests; failure falls back locally and never
+escalates; the half-duplex invariant holds on the fallback path too; the key lives in the Keychain
+under its own account and never in the settings payload; transmitted text is bounded at 2000
+chars; the session is ephemeral; requests are deadline-bounded at 10 s; errors surface once per
+configuration, not per turn. The warning states plainly that the reply can paraphrase or quote
+what Bark read or heard — it does not claim only Bark-authored text is sent. Streaming deferred.
+See `specs/018-elevenlabs-tts/` and SECURITY residuals L-23…L-25.

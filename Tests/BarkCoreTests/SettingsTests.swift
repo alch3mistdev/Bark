@@ -33,6 +33,28 @@ final class SettingsTests: XCTestCase {
         XCTAssertFalse(decoded.launchAtLogin)      // default
     }
 
+    func testDiscussionDefaultsAndTolerantDecode() throws {
+        // New 017 fields: off by default, F7 toggle, PTT mic, no TTS —
+        // and an old payload decodes to exactly those defaults.
+        XCTAssertFalse(Settings.default.discussionEnabled)
+        XCTAssertEqual(Settings.default.discussionHotkey,
+                       HotkeySetting(kind: .keyToggle, keyCode: 98, modifierFlags: 0))
+        XCTAssertEqual(Settings.default.discussionMicMode, .ptt)
+        XCTAssertFalse(Settings.default.discussionTTSEnabled)
+
+        let old = #"{"selectedModeID":"code"}"#
+        let decoded = try JSONDecoder().decode(Settings.self, from: Data(old.utf8))
+        XCTAssertFalse(decoded.discussionEnabled)
+        XCTAssertEqual(decoded.discussionMicMode, .ptt)
+
+        var s = Settings.default
+        s.discussionEnabled = true
+        s.discussionMicMode = .handsFree
+        s.discussionTTSEnabled = true
+        let roundTrip = try JSONDecoder().decode(Settings.self, from: JSONEncoder().encode(s))
+        XCTAssertEqual(roundTrip, s)
+    }
+
     func testSpeakerGateDefaultsAndTolerantDecode() throws {
         // New 011 fields default to off / medium and survive an old payload.
         XCTAssertFalse(Settings.default.speakerGateEnabled)

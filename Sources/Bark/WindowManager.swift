@@ -10,11 +10,13 @@ import SwiftUI
 final class WindowManager {
     private let controller: DictationController
     private let suggestions: SuggestionController
+    private let discussion: DiscussionController
     private var settingsWindow: NSWindow?
 
-    init(controller: DictationController, suggestions: SuggestionController) {
+    init(controller: DictationController, suggestions: SuggestionController, discussion: DiscussionController) {
         self.controller = controller
         self.suggestions = suggestions
+        self.discussion = discussion
     }
 
     func openSettings() {
@@ -22,7 +24,8 @@ final class WindowManager {
             present(window)
             return
         }
-        let hosting = NSHostingController(rootView: SettingsView(controller: controller, suggestions: suggestions))
+        let hosting = NSHostingController(rootView: SettingsView(
+            controller: controller, suggestions: suggestions, discussion: discussion))
         hosting.sizingOptions = []
 
         let size = SettingsView.windowSize

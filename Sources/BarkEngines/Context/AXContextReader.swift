@@ -10,17 +10,64 @@ import BarkCore
 /// `nonisolated` like `FocusProbe.focusedCaretRect`: the AX IPC is synchronous,
 /// so run this OFF the main actor with a short messaging timeout bounding a
 /// hung/modal target app.
+///
+/// The text policy lives in `WindowTextCollector` (pure, unit-tested); this
+/// type is only the `AXUIElement` plumbing that feeds it.
 public enum AXContextReader {
-    public static let maxDepth = 8
-    public static let maxElements = 200
-    static let axTimeout: Float = 0.25
+    /// Deeper than the original 8: web and Electron trees nest heavily, and
+    /// the interesting text sits well below the old ceiling.
+    public static let maxDepth = 40
+    public static let maxElements = 2_000
+    /// 0.5 s, matching the sibling scrim project: the 0.25 s default was tight
+    /// for a Chromium tree that has just been asked to materialize itself.
+    static let axTimeout: Float = 0.5
 
-    /// Roles whose values are visible text worth collecting.
-    static let textRoles: Set<String> = ["AXStaticText", "AXTextArea", "AXTextField"]
+    /// Apps already asked to expose their web content, so the ~400 ms build
+    /// cost is paid once per process rather than per capture.
+    private static let enabledLock = NSLock()
+    nonisolated(unsafe) private static var webContentEnabled: Set<pid_t> = []
+
+    /// Ask a Chromium/Electron app to build its accessibility tree.
+    ///
+    /// Chromium-derived apps (Chrome, Brave, VS Code, Cursor, Slack, Electron
+    /// generally) withhold their render tree until a client sets
+    /// `AXManualAccessibility`; some versions gate on `AXEnhancedUserInterface`
+    /// instead. Neither constant is in the SDK, hence the raw strings.
+    ///
+    /// Returns true when this call was the one that opted the app in — the
+    /// caller must then let the app build the tree before reading, because the
+    /// very next read still sees the old empty one.
+    nonisolated public static func prepare(target: InjectionTarget) -> Bool {
+        enabledLock.lock()
+        let alreadyEnabled = webContentEnabled.contains(target.pid)
+        if !alreadyEnabled { webContentEnabled.insert(target.pid) }
+        enabledLock.unlock()
+        guard !alreadyEnabled else { return false }
+
+        let app = AXUIElementCreateApplication(target.pid)
+        AXUIElementSetMessagingTimeout(app, axTimeout)
+        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        return true
+    }
+
+    /// Forget the opt-in cache (test seam; also correct if a pid is recycled).
+    nonisolated public static func resetWebContentCache() {
+        enabledLock.lock()
+        webContentEnabled.removeAll()
+        enabledLock.unlock()
+    }
 
     nonisolated public static func read(target: InjectionTarget) -> CapturedContext? {
-        let system = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(system, axTimeout)
+        // Focused element scoped to the TARGET APP, not system-wide (017
+        // recapture fix). System-wide focus is whatever holds key right now —
+        // and during a discussion session that is Bark's own overlay panel, so
+        // a mid-session recapture used to read field metadata off Bark's UI
+        // instead of the app being discussed. Asking the target app for its
+        // own focused element is correct whoever holds focus, which also makes
+        // the 015 path (captured before the panel takes key) read identically.
+        let app = AXUIElementCreateApplication(target.pid)
+        AXUIElementSetMessagingTimeout(app, axTimeout)
 
         // Focused element: value, label, placeholder, role (FR-002).
         var fieldLabel: String?
@@ -28,7 +75,7 @@ public enum AXContextReader {
         var fieldPlaceholder: String?
         var fieldRole: String?
         var focusedRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+        if AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
            let ref = focusedRef, CFGetTypeID(ref) == AXUIElementGetTypeID() {
             let focused = ref as! AXUIElement
             fieldRole = string(of: focused, kAXRoleAttribute)
@@ -42,22 +89,24 @@ public enum AXContextReader {
             }
         }
 
-        // Focused window of the target app: title + visible text walk.
-        let app = AXUIElementCreateApplication(target.pid)
-        AXUIElementSetMessagingTimeout(app, axTimeout)
+        // Window to read: the app's focused window, else its first real window
+        // (some apps — and any app that isn't frontmost — report no focused
+        // window at all, which previously yielded an empty capture).
         var windowTitle: String?
-        var collected: [String] = []
-        var windowRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
-           let ref = windowRef, CFGetTypeID(ref) == AXUIElementGetTypeID() {
-            let window = ref as! AXUIElement
+        var windowText = ""
+        var hasContentRoleText = false
+        if let window = focusedWindow(of: app) ?? mainWindow(of: app) ?? firstStandardWindow(of: app) {
             windowTitle = string(of: window, kAXTitleAttribute)
-            var visited = 0
-            collect(window, target: target, depth: 0, visited: &visited, into: &collected)
+            let result = WindowTextCollector.extract(
+                from: Node(element: window),
+                limits: .init(maxNodes: maxElements,
+                              maxCharacters: ContextBudget.maxChars,
+                              maxDepth: maxDepth)
+            )
+            let strategy = ContextBudget.strategy(isTerminal: target.isTerminal)
+            windowText = ContextBudget.clip(result.text, strategy: strategy)
+            hasContentRoleText = result.hasContentRoleText
         }
-
-        let strategy = ContextBudget.strategy(isTerminal: target.isTerminal)
-        let windowText = ContextBudget.clip(collected.joined(separator: "\n"), strategy: strategy)
 
         return CapturedContext(
             source: .accessibility,
@@ -67,41 +116,66 @@ public enum AXContextReader {
             fieldValue: fieldValue,
             fieldPlaceholder: fieldPlaceholder,
             fieldRole: fieldRole,
-            windowText: windowText
+            windowText: windowText,
+            hasContentRoleText: hasContentRoleText
         )
     }
 
-    /// DFS, bounded by depth and element count so a huge tree can't stall the
-    /// capture stage (SC-001: capture ≤ 1 s).
-    private static func collect(
-        _ element: AXUIElement,
-        target: InjectionTarget,
-        depth: Int,
-        visited: inout Int,
-        into out: inout [String]
-    ) {
-        guard depth <= maxDepth, visited < maxElements else { return }
-        visited += 1
+    /// Adapts an `AXUIElement` to the pure walk. `children` is computed lazily
+    /// so the collector's caps bound the AX round-trips, not just the output.
+    struct Node: AXTextNode {
+        let element: AXUIElement
 
-        let role = string(of: element, kAXRoleAttribute)
-        let subrole = string(of: element, kAXSubroleAttribute)
-        // Never collect secure-field content.
-        guard role != "AXSecureTextField", subrole != "AXSecureTextField" else { return }
+        var role: String { AXContextReader.string(of: element, kAXRoleAttribute) ?? "" }
+        var subrole: String? { AXContextReader.string(of: element, kAXSubroleAttribute) }
+        var value: String? { AXContextReader.string(of: element, kAXValueAttribute) }
+        var title: String? { AXContextReader.string(of: element, kAXTitleAttribute) }
 
-        if let role, textRoles.contains(role),
-           let value = clipped(string(of: element, kAXValueAttribute), isTerminal: target.isTerminal),
-           !value.isEmpty {
-            out.append(value)
+        var children: [any AXTextNode] {
+            var ref: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &ref) == .success,
+                  let raw = ref as? [AnyObject] else { return [] }
+            return raw.compactMap { child in
+                guard CFGetTypeID(child) == AXUIElementGetTypeID() else { return nil }
+                return Node(element: child as! AXUIElement)
+            }
         }
+    }
 
-        var childrenRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef) == .success,
-              let anyChildren = childrenRef as? [AnyObject] else { return }
-        for child in anyChildren {
-            guard visited < maxElements else { return }
-            guard CFGetTypeID(child) == AXUIElementGetTypeID() else { continue }
-            collect(child as! AXUIElement, target: target, depth: depth + 1, visited: &visited, into: &out)
+    private static func focusedWindow(of app: AXUIElement) -> AXUIElement? {
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &ref) == .success,
+              let value = ref, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return (value as! AXUIElement)
+    }
+
+    /// The app's main window — the right answer when the app isn't frontmost
+    /// and so reports no focused window.
+    private static func mainWindow(of app: AXUIElement) -> AXUIElement? {
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXMainWindowAttribute as CFString, &ref) == .success,
+              let value = ref, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return (value as! AXUIElement)
+    }
+
+    /// First STANDARD window. `kAXWindows` is not a list of windows: it also
+    /// carries tooltips, popovers, transient dialogs and helper windows, which
+    /// on a busy desktop outnumber the real ones — taking `windows[0]` blindly
+    /// measured 50 characters out of an editor that had thousands, because the
+    /// first entry was an 8-node palette.
+    private static func firstStandardWindow(of app: AXUIElement) -> AXUIElement? {
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &ref) == .success,
+              let raw = ref as? [AnyObject] else { return nil }
+        for candidate in raw {
+            guard CFGetTypeID(candidate) == AXUIElementGetTypeID() else { continue }
+            let window = candidate as! AXUIElement
+            guard string(of: window, kAXRoleAttribute) == kAXWindowRole as String,
+                  string(of: window, kAXSubroleAttribute) == kAXStandardWindowSubrole as String
+            else { continue }
+            return window
         }
+        return nil
     }
 
     /// Label via the focused element's `AXTitleUIElement` (how AppKit exposes a
@@ -114,17 +188,33 @@ public enum AXContextReader {
         return string(of: titleElement, kAXValueAttribute) ?? string(of: titleElement, kAXTitleAttribute)
     }
 
-    private static func string(of element: AXUIElement, _ attribute: String) -> String? {
+    /// Reads a string attribute, coercing the three shapes `AXValue` actually
+    /// arrives in. A plain `as? String` — the original — silently dropped every
+    /// rich-text view (`NSAttributedString`) and every numeric cell
+    /// (`NSNumber`), which is a lot of real content in editors and spreadsheets.
+    static func string(of element: AXUIElement, _ attribute: String) -> String? {
         var ref: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, attribute as CFString, &ref) == .success,
-              let value = ref as? String, !value.isEmpty else { return nil }
-        return value
+              let raw = ref else { return nil }
+        let text: String?
+        if let s = raw as? String {
+            text = s
+        } else if let attributed = raw as? NSAttributedString {
+            text = attributed.string
+        } else if let number = raw as? NSNumber {
+            text = number.stringValue
+        } else {
+            text = nil
+        }
+        guard let text, !text.isEmpty else { return nil }
+        return text
     }
 
     /// Pre-clip a single huge value (terminal scrollback is one giant AXValue)
-    /// so string assembly stays cheap; the final budget clip still applies.
+    /// so one element can't blow the whole budget before clipping runs.
     private static func clipped(_ value: String?, isTerminal: Bool) -> String? {
         guard let value else { return nil }
-        return ContextBudget.clip(value, strategy: ContextBudget.strategy(isTerminal: isTerminal))
+        let strategy = ContextBudget.strategy(isTerminal: isTerminal)
+        return ContextBudget.clip(value, strategy: strategy)
     }
 }

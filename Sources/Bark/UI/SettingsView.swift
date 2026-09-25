@@ -6,6 +6,7 @@ import BarkCore
 struct SettingsView: View {
     @Bindable var controller: DictationController
     @Bindable var suggestions: SuggestionController
+    @Bindable var discussion: DiscussionController
     @State private var pane: Pane = .general
 
     /// Single source of truth for the settings window size — `WindowManager`
@@ -13,7 +14,7 @@ struct SettingsView: View {
     static let windowSize = CGSize(width: 480, height: 430)
 
     enum Pane: String, CaseIterable, Identifiable {
-        case general, hotkey, modes, models, suggest, history, permissions, privacy
+        case general, hotkey, modes, models, suggest, discuss, history, permissions, privacy
         var id: String { rawValue }
         var icon: String {
             switch self {
@@ -22,6 +23,7 @@ struct SettingsView: View {
             case .modes: "slider.horizontal.3"
             case .models: "externaldrive.badge.checkmark"
             case .suggest: "text.bubble"
+            case .discuss: "bubble.left.and.bubble.right"
             case .history: "clock"
             case .permissions: "lock.shield"
             case .privacy: "hand.raised"
@@ -34,6 +36,7 @@ struct SettingsView: View {
             case .modes: "Modes"
             case .models: "Models"
             case .suggest: "Suggest"
+            case .discuss: "Discuss"
             case .history: "History"
             case .permissions: "Permissions"
             case .privacy: "Privacy"
@@ -54,7 +57,7 @@ struct SettingsView: View {
                             Text(item.title)
                                 .font(.system(size: 9))
                         }
-                        .frame(width: 52, height: 42)   // 8 tabs must fit the 480 pt window (015)
+                        .frame(width: 49, height: 42)   // 9 tabs must fit the 480 pt window (017)
                         .background(pane == item ? Color.accentColor.opacity(0.18) : .clear,
                                     in: RoundedRectangle(cornerRadius: 7))
                         .foregroundStyle(pane == item ? Color.accentColor : .secondary)
@@ -78,6 +81,7 @@ struct SettingsView: View {
                 case .modes: ModesPane(controller: controller)
                 case .models: ModelsPane()
                 case .suggest: SuggestionsPane(controller: controller, suggestions: suggestions)
+                case .discuss: DiscussionPane(controller: controller, discussion: discussion)
                 case .history: HistoryPane(controller: controller)
                 case .permissions: PermissionsPane(controller: controller)
                 case .privacy: PrivacyPane()

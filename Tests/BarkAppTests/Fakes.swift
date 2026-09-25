@@ -306,17 +306,29 @@ final class InMemorySpeakerProfileStore: SpeakerProfileStore, @unchecked Sendabl
 }
 
 /// 015: scripted on-screen context capture — canned result or a capture error.
+/// Lock-protected because 017's Recapture can fire while a turn's own capture
+/// is in flight, so this is genuinely called from concurrent tasks.
 final class FakeContextCapture: ContextCapturing, @unchecked Sendable {
     enum Behavior { case ok(CapturedContext), fail(ContextCaptureError) }
     private let behavior: Behavior
-    private(set) var captureCount = 0
-    private(set) var lastTarget: InjectionTarget?
+    private let lock = NSLock()
+    private var count = 0
+    private var target: InjectionTarget?
 
     init(_ behavior: Behavior) { self.behavior = behavior }
 
+    var captureCount: Int { lock.lock(); defer { lock.unlock() }; return count }
+    var lastTarget: InjectionTarget? { lock.lock(); defer { lock.unlock() }; return target }
+
+    private func record(_ target: InjectionTarget) {
+        lock.lock()
+        count += 1
+        self.target = target
+        lock.unlock()
+    }
+
     func capture(target: InjectionTarget) async throws -> CapturedContext {
-        captureCount += 1
-        lastTarget = target
+        record(target)
         switch behavior {
         case .ok(let context): return context
         case .fail(let error): throw error
@@ -400,6 +412,109 @@ final class FakeInjector: TextInjector, @unchecked Sendable {
         }
         recorded.append(text)
     }
+}
+
+/// 017: dialogue engine with a scripted sequence of outcomes — each `reply`
+/// call consumes the next one; `synthesize` uses `synthesisBehavior`. Records
+/// every (system, turns) pair it receives so tests can assert grounding.
+final class FakeDialogueEngine: DialogueEngine, @unchecked Sendable {
+    enum Outcome { case ok(String), fail(DialogueError), hang }
+    private var replyScript: [Outcome]
+    private let synthesisBehavior: Outcome
+    let available: Bool
+    private(set) var replyCalls: [(system: String, turns: [DialogueTurn])] = []
+    private(set) var synthesizeCalls: [(system: String, turns: [DialogueTurn])] = []
+
+    init(replies: [Outcome], synthesis: Outcome = .ok("Final prompt."), available: Bool = true) {
+        self.replyScript = replies
+        self.synthesisBehavior = synthesis
+        self.available = available
+    }
+
+    var isAvailable: Bool { get async { available } }
+
+    func reply(system: String, turns: [DialogueTurn]) async throws -> String {
+        replyCalls.append((system, turns))
+        let outcome = replyScript.isEmpty ? .fail(.engineUnavailable) : replyScript.removeFirst()
+        return try await run(outcome)
+    }
+
+    func synthesize(system: String, turns: [DialogueTurn]) async throws -> String {
+        synthesizeCalls.append((system, turns))
+        return try await run(synthesisBehavior)
+    }
+
+    private func run(_ outcome: Outcome) async throws -> String {
+        switch outcome {
+        case .ok(let raw): return raw
+        case .fail(let error): throw error
+        case .hang: try await Task.sleep(for: .seconds(60)); return ""
+        }
+    }
+}
+
+/// 017: speech synthesizer whose `speak` suspends until the test releases it
+/// (or immediately when `gated` is false), so tests can hold TTS "mid-playback"
+/// and prove the mic never arms during it (SC-002). `stop()` releases the
+/// pending `speak`, matching the real engine's skip semantics.
+@MainActor
+final class FakeSpeechSynthesizer: SpeechSynthesizing {
+    private let gated: Bool
+    private(set) var spoken: [String] = []
+    private(set) var stopCount = 0
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+
+    nonisolated init(gated: Bool = false) { self.gated = gated }
+
+    var speaking: Bool { !continuations.isEmpty }
+
+    private(set) var spokenVoices: [SpeechVoiceConfig?] = []
+    /// Voices the picker should offer; empty by default.
+    var voices: [VoiceOption] = []
+    nonisolated var availableVoices: [VoiceOption] {
+        MainActor.assumeIsolated { voices }
+    }
+
+    func speak(_ text: String, voice: SpeechVoiceConfig?) async {
+        spoken.append(text)
+        spokenVoices.append(voice)
+        guard gated else { return }
+        await withCheckedContinuation { continuations.append($0) }
+    }
+
+    nonisolated func stop() {
+        Task { @MainActor in
+            self.stopCount += 1
+            self.releaseAll()
+        }
+    }
+
+    func releaseAll() {
+        let pending = continuations
+        continuations.removeAll()
+        pending.forEach { $0.resume() }
+    }
+}
+
+/// 018: a cloud TTS primary that always fails, for proving the composite's
+/// fallback path (and that the half-duplex gate holds while the LOCAL voice
+/// speaks, not just the cloud one).
+final class FailingCloudPrimary: FallibleSpeechSynthesizing, @unchecked Sendable {
+    private let error: SpeechSynthesisError
+    private let lock = NSLock()
+    private var _attempts = 0
+    var attempts: Int { lock.lock(); defer { lock.unlock() }; return _attempts }
+
+    init(_ error: SpeechSynthesisError = .http(429)) { self.error = error }
+
+    private func count() { lock.lock(); _attempts += 1; lock.unlock() }
+
+    func synthesizeAndPlay(_ text: String) async throws {
+        count()
+        throw error
+    }
+
+    func stop() {}
 }
 
 /// Injector that suspends inside `inject` until `releaseAll()` is called, so a

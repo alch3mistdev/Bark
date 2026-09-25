@@ -22,6 +22,10 @@ public struct CapturedContext: Sendable, Equatable {
     public var fieldPlaceholder: String?
     public var fieldRole: String?
     public var windowText: String
+    /// `windowText` includes text from a content-bearing role (a document or
+    /// terminal surface), not just the app's chrome. Defaults false so an OCR
+    /// capture — which has no roles at all — never claims otherwise.
+    public var hasContentRoleText: Bool
 
     public init(
         source: ContextSource,
@@ -31,7 +35,8 @@ public struct CapturedContext: Sendable, Equatable {
         fieldValue: String?,
         fieldPlaceholder: String?,
         fieldRole: String?,
-        windowText: String
+        windowText: String,
+        hasContentRoleText: Bool = false
     ) {
         self.source = source
         self.appBundleID = appBundleID
@@ -41,6 +46,7 @@ public struct CapturedContext: Sendable, Equatable {
         self.fieldPlaceholder = fieldPlaceholder
         self.fieldRole = fieldRole
         self.windowText = windowText
+        self.hasContentRoleText = hasContentRoleText
     }
 
     /// Below this much useful text, AX capture is considered too thin to prompt
@@ -51,6 +57,19 @@ public struct CapturedContext: Sendable, Equatable {
 
     /// Literally nothing to prompt on (AX and OCR both empty → honest error).
     public var isEmptyOfText: Bool { usefulCharCount == 0 }
+
+    /// We read the app's furniture, not its content.
+    ///
+    /// Canvas-rendered terminals (cmux, and xterm.js with the canvas/WebGL
+    /// renderer generally) expose a text area whose `AXValue` is empty — the
+    /// scrollback is pixels. What remains in the tree is the app's own chrome:
+    /// tab labels, a session sidebar, a status bar. That easily clears a
+    /// character-count threshold, so a naive "is it thin?" check reports
+    /// success and hands the model a sidebar as if it were the screen. Callers
+    /// use this to prefer OCR, or to say honestly that they read nothing.
+    public var isChromeOnly: Bool {
+        source == .accessibility && !hasContentRoleText && !isEmptyOfText
+    }
 
     /// Non-whitespace characters across window text + field metadata.
     private var usefulCharCount: Int {

@@ -17,7 +17,7 @@ public final class ClipboardInjector: TextInjector {
         guard !text.isEmpty else { throw InjectionError.emptyText }
         try await MainActor.run {
             let decision = SecureFieldPolicy.decide(
-                secureInputEnabled: SecureFieldDetector.secureInputActive(),
+                secureInputEnabled: SecureFieldDetector.secureInputActive(forPID: plan.target.pid),
                 focusedElementRole: SecureFieldDetector.focusedElementRole()
             )
             if case .refuse(let reason) = decision {

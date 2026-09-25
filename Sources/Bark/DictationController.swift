@@ -28,6 +28,11 @@ public final class DictationController {
     public private(set) var isModelReady = false
     public private(set) var llmStatus: LLMStatus = .unavailable
     public private(set) var handsFreeActive = false
+    /// 017: hard mic interlock. While a discussion session holds the lease,
+    /// dictation and hands-free refuse to start — advisory phase reads are not
+    /// enough, since a second controller could otherwise open its own
+    /// `AudioCapturing` concurrently.
+    public var micLeaseHeld = false
     public private(set) var isReinserting = false   // serializes one-click re-insert (Codex)
     public private(set) var inputLevel: Float = 0    // 0...1 smoothed mic level for the HUD meter
     public private(set) var speakerEnrolled = false  // a usable voiceprint is loaded (011)
@@ -139,6 +144,8 @@ public final class DictationController {
     /// conforms to `SuggestionEngine`) and the same history store — exposed for
     /// `CompositionRoot` wiring only.
     var sharedSuggestionEngine: SuggestionEngine? { llmCleaner as? SuggestionEngine }
+    /// 017: the discussion dialogue rides the same residency.
+    var sharedDialogueEngine: DialogueEngine? { llmCleaner as? DialogueEngine }
     var sharedHistoryStore: HistoryStore? { history }
 
     // MARK: - Settings-derived state (UI binds here; writes persist)
@@ -178,6 +185,10 @@ public final class DictationController {
             }
             guard newValue != settings.settings.suggestionsHotkey else {   // 3-way guard (015)
                 lastError = "That key is already the suggestions hotkey."
+                return
+            }
+            guard newValue != settings.settings.discussionHotkey else {   // 4-way guard (017)
+                lastError = "That key is already the discussion hotkey."
                 return
             }
             // Rebinding mid-session would strand a live session on the old key (Codex).
@@ -301,6 +312,10 @@ public final class DictationController {
             guard let delay = self?.llmIdleUnloadAfter else { return }
             try? await Task.sleep(for: .seconds(delay))
             guard let self, !Task.isCancelled, self.llmStatus == .ready else { return }
+            // 017 (ADV-006): a discussion session shares this residency —
+            // unloading mid-conversation would strand every remaining turn on
+            // engineUnavailable. Defer while the lease is held.
+            guard !self.micLeaseHeld else { self.scheduleLLMIdleUnload(); return }
             self.llmStatus = .notLoaded
             await self.llmCleaner?.unload()
             BarkLog.cleanup.info("llm released after \(Int(delay), privacy: .public)s idle")
@@ -486,6 +501,10 @@ public final class DictationController {
 
     public func refreshPermissions() { permissions.refresh() }
 
+    public func permissionState(of kind: PermissionKind) -> PermissionState {
+        permissions.state(of: kind)
+    }
+
     public func requestOpenSettings() { onOpenSettings?() }
 
     public var soundFeedback: Bool {
@@ -585,7 +604,7 @@ public final class DictationController {
     // MARK: - Start / stop
 
     public func startDictation() {
-        guard !machine.isActive, !handsFreeActive else { return }   // one mic owner at a time
+        guard !machine.isActive, !handsFreeActive, !micLeaseHeld else { return }   // one mic owner at a time
         // Recover from a previous .completed / .failed run so the hotkey always works.
         if machine.phase != .idle { machine.handle(.reset) }
         lastError = nil; lastErrorPermission = nil
@@ -1050,6 +1069,10 @@ public final class DictationController {
                 lastError = "That key is already the suggestions hotkey."
                 return
             }
+            guard newValue != settings.settings.discussionHotkey else {   // 4-way guard (017)
+                lastError = "That key is already the discussion hotkey."
+                return
+            }
             settings.update { $0.handsFreeHotkey = newValue }
             handsFreeHotkey.update(HotkeyConfig(newValue))
         }
@@ -1149,7 +1172,7 @@ public final class DictationController {
     }
 
     public func startHandsFree() {
-        guard !handsFreeActive, !machine.isActive else { return }  // one mic owner
+        guard !handsFreeActive, !machine.isActive, !micLeaseHeld else { return }  // one mic owner
         lastError = nil; lastErrorPermission = nil
         guard permissions.microphone == .granted else {
             fail("Microphone access is required. Grant it in System Settings.")
@@ -1183,9 +1206,16 @@ public final class DictationController {
     /// Continuous, VAD-gated loop: detect speech onset → capture the utterance →
     /// on silence, finalize → clean → inject → keep listening. Until toggled off.
     private func runHandsFree(_ engine: AudioCapturing) async {
+        // 017 (ADV-013): if a discussion took the mic (or we were cancelled)
+        // before this queued worker ran, opening the engine would orphan a
+        // hot mic that stopHandsFree() can no longer reach.
+        guard !Task.isCancelled, !micLeaseHeld, handsFreeActive else { return }
         let stream: AsyncStream<AudioFrames>
         do { stream = try engine.start() }
         catch { fail(Self.describe(error)); stopHandsFree(); return }
+        // Belt-and-braces: whatever path exits this loop, THIS engine stops —
+        // `handsFreeAudio` may already point at a successor (ADV-013).
+        defer { engine.stop() }
 
         var vad = VoiceActivityDetector(config: VADConfig(sensitivity: settings.settings.vadSensitivity))
         var capturing = false

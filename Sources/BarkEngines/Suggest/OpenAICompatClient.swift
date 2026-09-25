@@ -32,6 +32,17 @@ public final class OpenAICompatClient: SuggestionEngine, Sendable {
     }
 
     public func suggest(_ request: SuggestionRequest) async throws -> String {
+        try await complete(
+            messages: [
+                .init(role: "system", content: request.system),
+                .init(role: "user", content: request.user),
+            ],
+            maxTokens: 256
+        )
+    }
+
+    /// Shared POST for both protocols' calls. Returns choices[0].message.content.
+    private func complete(messages: [ChatRequest.Message], maxTokens: Int) async throws -> String {
         guard let url = Self.chatCompletionsURL(base: endpoint) else {
             throw SuggestionError.endpointNotConfigured
         }
@@ -41,15 +52,7 @@ public final class OpenAICompatClient: SuggestionEngine, Sendable {
         if let apiKey, !apiKey.isEmpty {
             urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
-        let body = ChatRequest(
-            model: model,
-            messages: [
-                .init(role: "system", content: request.system),
-                .init(role: "user", content: request.user),
-            ],
-            max_tokens: 256,
-            temperature: 0
-        )
+        let body = ChatRequest(model: model, messages: messages, max_tokens: maxTokens, temperature: 0)
         urlRequest.httpBody = try JSONEncoder().encode(body)
 
         let data: Data
@@ -107,5 +110,38 @@ public final class OpenAICompatClient: SuggestionEngine, Sendable {
             let message: Message
         }
         let choices: [Choice]
+    }
+}
+
+/// 017: multi-turn dialogue over the same endpoint and wire types — the
+/// transcript maps 1:1 onto the chat-completions `messages` array. Errors
+/// are remapped to `DialogueError` so the discussion controller branches on
+/// one taxonomy regardless of backend.
+extension OpenAICompatClient: DialogueEngine {
+    public func reply(system: String, turns: [DialogueTurn]) async throws -> String {
+        try await dialogueComplete(system: system, turns: turns, maxTokens: 256)
+    }
+
+    public func synthesize(system: String, turns: [DialogueTurn]) async throws -> String {
+        try await dialogueComplete(system: system, turns: turns, maxTokens: 512)
+    }
+
+    private func dialogueComplete(system: String, turns: [DialogueTurn], maxTokens: Int) async throws -> String {
+        let messages: [ChatRequest.Message] = [.init(role: "system", content: system)]
+            + turns.map { .init(role: $0.role.rawValue, content: $0.text) }
+        do {
+            return try await complete(messages: messages, maxTokens: maxTokens)
+        } catch let error as SuggestionError {
+            switch error {
+            case .engineUnavailable, .endpointNotConfigured:
+                throw DialogueError.engineUnavailable
+            case .http(let code):
+                throw DialogueError.transport("HTTP \(code)")
+            case .network(let message):
+                throw DialogueError.transport(message)
+            case .badResponse(let message):
+                throw DialogueError.badResponse(message)
+            }
+        }
     }
 }

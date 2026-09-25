@@ -55,7 +55,7 @@ final class SuggestionOverlayController: NSObject, NSWindowDelegate {
         }
 
         positionToken += 1
-        guard !SecureFieldDetector.secureInputActive() else { return }
+        guard !SecureFieldDetector.secureInputActiveForFrontmostApp() else { return }
         let token = positionToken
         Task.detached {
             guard let caret = FocusProbe.focusedCaretRect() else { return }

@@ -58,7 +58,7 @@ final class RecordingHUDController {
         // reposition. Skip entirely for secure fields (don't anchor over a password
         // field) (ADV-004).
         positionToken += 1
-        guard controller.enhancedHUD, !SecureFieldDetector.secureInputActive() else { return }
+        guard controller.enhancedHUD, !SecureFieldDetector.secureInputActiveForFrontmostApp() else { return }
         let token = positionToken
         Task.detached {
             guard let caret = FocusProbe.focusedCaretRect() else { return }

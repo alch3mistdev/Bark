@@ -49,8 +49,11 @@ code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the nex
   README copy state these limits plainly (FR-011 / SC-007).
 
 ## Text-injection safety  (`BarkEngines/Inject/*`, `BarkCore/Inject/*`)
-- ☑ Refuse injection when `IsSecureEventInputEnabled()` or the focused AX element is `AXSecureTextField`
-  (`SecureFieldPolicy` + `SecureFieldDetector`). (SEC-002 / T-005) — **best-effort**, see L-2.
+- ☑ Refuse injection when Secure Event Input is held **by the target app** (holder pid from the
+  IORegistry `IOConsoleUsers` record; an unreadable holder still refuses) or the focused AX element is
+  `AXSecureTextField` (`SecureFieldPolicy` + `SecureFieldDetector`). (SEC-002 / T-005) — **best-effort**,
+  see L-2. The raw system-wide flag is not used: `loginwindow` keeps it on after some unlocks, which
+  refused everything.
 - ☑ Re-verify the focused app (PID) is unchanged immediately before injecting (`FocusGuard` +
   `FocusProbe`); abort on mismatch. (SEC-004 / T-004) — **app-level**, see L-1.
 - ☑ Never synthesize Return/Enter; strip trailing newlines; for terminals, strip all newlines and use
@@ -165,6 +168,93 @@ code. Items marked ☐ are designed-but-not-yet-implemented (tracked for the nex
 - **Residual (L-18 — OCR misreads):** recognized text can differ from what is truly on screen;
   suggestions built on it remain subject to the same output validation and are only ever inserted by an
   explicit user pick.
+
+## Discussion surface  (`BarkCore/Discuss/*`, `BarkCore/Speech/*`, `BarkEngines/Speech/*`, `Sources/Bark/Discussion*`, ADR-011, `specs/017-socratic-discussion/`)
+- ☑ **Off by default** (`Settings.discussionEnabled == false`); the F7 tap reaches other apps until the
+  user opts in (the tap starts only when enabled).
+- ☑ **Session start refuses secure fields** via the same capture path as 015 (`ContextCaptureError
+  .secureField` ⇒ session refused, FR-013); Confirm-time injection re-runs the full preflight
+  (PID re-verify + secure-field policy) inside the unchanged injectors.
+- ☑ **Transcript + capture are memory-only**: never persisted, never logged (timings only), never
+  written to history — stronger than 015: a discussion records **nothing**. Wiped on session end
+  (FR-010).
+- ☑ **Prompt-injection defense re-applied**: screen context uses the 015 fences; every user utterance
+  is fenced in `<user_turn>` blocks with fixed-point tag neutralization (`DialoguePromptBuilder`);
+  the readiness signal is a parsed JSON flag whose malformed degrade is `ready=false`, so hostile
+  screen/speech content can neither steer the system prompt nor force synthesis (FR-003/FR-011).
+- ☑ **Mic exclusivity is a hard interlock**: `DictationController.micLeaseHeld` makes both dictation
+  start paths refuse while a session runs; hands-free is suspended and auto-resumed. **Half-duplex is
+  tested**: audio capture can start only in mic-legal states, and TTS playback must complete before
+  the mic re-arms (SC-002, gated-fake test). Post-adversarial hardening: mic arming is single-owner
+  (generation-tokened VAD loops; a stale loop stops its own engine), the capture engine is stopped at
+  the device level before transcription/generation run, PTT turns are latched synchronously against
+  double-taps, and every exit from the speaking state silences TTS and invalidates its pending
+  completion (ADV-001…004, ADV-010…013).
+- ☑ **No Return, no auto-submit**: `ReturnKeySynthesizing` is not wired into the discussion path at
+  all; the sole handoff is a previewed, user-confirmed insert through the sanitizer/router.
+- ☑ **TTS is on-device** (`AVSpeechSynthesizer`); its failure degrades to text-only silently.
+- ☑ **External endpoint reuses the ADR-010 opt-in** with strengthened warning copy: the entire
+  multi-turn conversation plus captured screen text is transmitted per turn when selected.
+- ☑ **cmux is a recognized terminal** (2026-09-15). `com.cmuxterm.app` was absent from
+  `TerminalDetector`, so injection took the **paste** path: Bark's single-line keystroke guarantee
+  covers only terminals it knows, and for unrecognized ones a multi-line payload depends on the
+  app's own bracketed-paste handling to avoid executing lines. Discussion drafts can be
+  multi-line, so this was a live path to unintended command execution. It now gets keystroke
+  injection (single line) and tail-biased context clipping.
+- ☑ **Chrome-only captures are refused, not presented as content** (2026-09-15). Canvas-drawn
+  terminals expose a text area whose `AXValue` is empty, leaving only the app's furniture (tab
+  labels, session sidebar, status bar) — several hundred characters that clear any length
+  threshold. For a terminal target, `CapturedContext.isChromeOnly` now routes to OCR, and with no
+  OCR available the capture fails honestly rather than handing the model a sidebar as if it were
+  the screen. (Non-terminals are unaffected: a page's headings and labels genuinely are content,
+  so 015 does not regress.)
+- ☑ **Capture's secure-field check follows the TARGET APP, not system focus** (2026-09-15 fix).
+  `AXContextReader` and the pre-read refusal now resolve the focused element via
+  `AXUIElementCreateApplication(pid)` rather than `AXUIElementCreateSystemWide()`. The old
+  system-wide read described whichever element held key focus — during a discussion session that
+  is Bark's own overlay panel, so a mid-session Recapture could both read the wrong app's field
+  metadata and miss a password field that had gained focus in the target since session start.
+  Effectiveness is OS-adapter behavior that cannot be unit-tested; what IS tested is that the
+  refusal seam receives the capture target (`ContextCaptureServiceTests`).
+- **Residual (L-19 — readiness contract):** the empty-reply synthesis trigger depends on the model
+  honoring the JSON contract; a model that never emits it simply never auto-drafts (the Done button is
+  the guaranteed path). No safety property depends on the model complying.
+- **Residual (L-20 — spoken content is audible):** TTS reads AI questions aloud; in shared spaces that
+  may disclose the discussion's topic. Off by default; the overlay always shows the same text.
+- **Residual (L-21 — speaker gate not applied, ADV-007):** the 011 voice gate does not filter
+  discussion turns — in hands-free mode any audible voice can take a turn and (with the external
+  backend) its words are transmitted per turn without preview. The Discuss pane states this
+  explicitly; gate integration is future work.
+- **Residual (L-22 — second STT residency):** the discussion runs its own `STTEngine` instance
+  (mic-lease-serialized against dictation's); with a downloaded backend that is a second model
+  residency, loaded at first session and held until quit.
+
+### Cloud TTS egress  (`BarkCore/Speech/CloudTTSRequest.swift`, `BarkEngines/Speech/{ElevenLabsSynthesizer,FallbackSpeechSynthesizer}.swift`, ADR-012, `specs/018-elevenlabs-tts/`)
+- ☑ **Off by default** (`Settings.discussionTTSBackend == .system`). With the on-device backend
+  selected the cloud primary refuses *before* touching `URLSession`, so the speech path makes
+  **zero** network requests — asserted by a stub that fails the test if invoked.
+- ☑ **Fails toward the local engine, structurally**: `FallbackSpeechSynthesizer` is the speech
+  path and the cloud engine's only failure action is local playback. No path escalates a cloud
+  failure to further transmission; no path leaves a turn silent (constitution Principle I).
+- ☑ **Half-duplex holds on the fallback path**: `speak` returns only after the *local* playback
+  finishes, so the mic cannot open while either voice is talking (tested with a gated local fake
+  behind a failing cloud primary).
+- ☑ **Key in the Keychain** under `elevenlabs-api-key`, a distinct account from ADR-010's
+  `external-llm-key` so either can be deleted independently; never in the settings payload
+  (asserted by encoding settings and searching the output).
+- ☑ **Bounded and ephemeral**: transmitted text capped at 2000 characters, `.ephemeral` URL
+  session (no cache of reply content), audio held in memory for playback only, 10 s deadline with
+  cancellation so a turn cannot hang.
+- ☑ **Transmitted:** the AI's reply text only. **Never transmitted:** microphone audio, the screen
+  capture itself, the discussion transcript, dictation output, history.
+- **Residual (L-23 — replies can quote captured content):** the reply is *derived* from the
+  capture and the user's speech and may paraphrase or quote either, so the transmitted text is not
+  "Bark's own words". The settings warning says this explicitly rather than eliding it.
+- **Residual (L-24 — provider retention):** transmitted text is subject to ElevenLabs' retention
+  and abuse-monitoring policy, which Bark neither controls nor can attest to.
+- **Residual (L-25 — deliberate trade):** a user who enables this has traded the offline guarantee
+  for voice quality on this one feature. Nothing else in the app changes, and switching the
+  backend back to on-device stops transmission immediately.
 
 ## Permissions — least privilege  (`Resources/Bark.entitlements`, `PermissionsCoordinator`)
 - ☑ Only the microphone device entitlement. Accessibility + Input Monitoring are user-granted via TCC,
